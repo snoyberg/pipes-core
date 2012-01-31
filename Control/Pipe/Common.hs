@@ -117,10 +117,10 @@ import Prelude hiding ((.), id)
     Threads\".
 -}
 data Pipe a b m r =
-    Pure r                     -- pure = Pure
-  | M     (m   (Pipe a b m r)) -- Monad
-  | Await (a -> Pipe a b m r) (Maybe (Pipe a b m r)) -- ((->) a) Functor
-  | Yield (b,   Pipe a b m r ) -- ((,)  b) Functor
+    Pure r
+  | M (m (Pipe a b m r))
+  | Await (Maybe a -> Pipe a b m r)
+  | Yield b (Pipe a b m r)
 {- I could have factored Pipe as:
 
 data Computation f r = Pure r | F (f (Computation f r))
@@ -136,27 +136,19 @@ newtype Pipe a b m r = P { unP :: Computation (PipeF a b m) r }
    library around it. -}
 
 instance (Monad m) => Functor (Pipe a b m) where
-    fmap f c = case c of
-        Pure r   -> Pure $ f r
-        M mc     -> M     $ liftM (fmap f) mc
-        Await fc c'-> Await (fmap  (fmap f) fc) (fmap (fmap f) c')
-        Yield fc -> Yield $ fmap  (fmap f) fc
+    fmap = liftM
 
 instance (Monad m) => Applicative (Pipe a b m) where
     pure = Pure
-    f <*> x = case f of
-        Pure r   -> fmap r x
-        M mc     -> M     $ liftM (<*> x) mc
-        Await fc c' -> Await (fmap  (<*> x) fc) (fmap (<*> x) c')
-        Yield fc -> Yield $ fmap  (<*> x) fc
+    (<*>) = ap
 
 instance (Monad m) => Monad (Pipe a b m) where
     return = pure
     m >>= f = case m of
-        Pure r   -> f r
-        M mc     -> M     $ liftM (>>= f) mc
-        Await fc c' -> Await (fmap  (>>= f) fc) (fmap (>>= f) c')
-        Yield fc -> Yield $ fmap  (>>= f) fc
+        Pure r -> f r
+        M mc -> M $ liftM (>>= f) mc
+        Await k -> Await $ \x -> k x >>= f
+        Yield x c -> Yield x (c >>= f)
 
 instance MonadTrans (Pipe a b) where lift = M . liftM pure
 
@@ -182,11 +174,11 @@ type Pipeline m r = Pipe Zero Zero m r
 
     'await' blocks until input is ready.
 -}
-await :: Pipe a b m a
-await = Await Pure Nothing
+await :: Monad m => Pipe a b m a
+await = Await $ maybe discard Pure
 
 tryAwait :: Pipe a b m (Maybe a)
-tryAwait = Await (Pure . Just) (Just $ Pure Nothing)
+tryAwait = Await Pure
 
 {-|
     Pass output downstream within the 'Pipe' monad:
@@ -194,7 +186,7 @@ tryAwait = Await (Pure . Just) (Just $ Pure Nothing)
     'yield' blocks until the output has been received.
 -}
 yield :: b -> Pipe a b m ()
-yield x = Yield (x, Pure ())
+yield x = Yield x (Pure ())
 
 {-|
     Convert a pure function into a pipe
@@ -234,14 +226,18 @@ infixl 9 >+>, <-<
 instance (Monad m) => Category (Lazy m r) where
     id = Lazy $ pipe id
     Lazy p1' . Lazy p2' = Lazy $ case (p1', p2') of
-        (Yield (x1, p1), p2            ) -> yield x1 >>         p1 <+< p2
-        (M m1          , p2            ) -> lift m1  >>= \p1 -> p1 <+< p2
-        (Pure r1       , _             ) -> Pure r1
-        (p1            , Await f2 c    ) -> Await (\x -> p1 <+< f2 x) $ (<+<) <$> pure p1 <*> c
-        (p1            , M m2          ) -> lift m2  >>= \p2 -> p1 <+< p2
-        (Await f1 _    , Yield (x2, p2)) -> f1 x2 <+< p2
-        (Await f1 Nothing, Pure r2     ) -> Pure r2
-        (Await _ (Just c), Pure r2     ) -> c <+< Pure r2
+        (Yield x1 p1, p2) -> yield x1 >>         p1 <+< p2
+        (M m1, p2) -> lift m1  >>= \p1 -> p1 <+< p2
+        (Pure r1, _) -> Pure r1
+        (p1, Await f2) -> Await (\x -> p1 <+< f2 x)
+        (p1, M m2) -> lift m2  >>= \p2 -> p1 <+< p2
+        (Await f1, Yield x2 p2) -> f1 (Just x2) <+< p2
+        (Await f1, Pure r2) -> finalize r2 (f1 Nothing)
+      where
+        finalize r (Yield x c) = yield x >> finalize r c
+        finalize r (M m) = lift m >>= finalize r
+        finalize _ (Pure r) = return r
+        finalize r (Await _) = return r
 
 instance (Monad m) => Category (Strict m r) where
     id = Strict $ pipe id
@@ -260,6 +256,6 @@ runPipe p' = case p' of
     Pure r          -> return r
     M mp            -> mp >>= runPipe
     -- Technically a blocked Pipe can still await
-    Await f _       -> runPipe $ f Zero
+    Await f         -> runPipe $ f (Just Zero)
     -- A blocked Pipe can not yield, but I include this as a precaution
-    Yield (_, p) -> runPipe p
+    Yield _ p       -> runPipe p
