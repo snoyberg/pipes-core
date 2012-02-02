@@ -98,6 +98,7 @@ import Control.Applicative
 import Control.Category
 import Control.Monad
 import Control.Monad.Trans
+import Data.Maybe
 import Prelude hiding ((.), id)
 
 {-|
@@ -225,19 +226,18 @@ infixl 9 >+>, <-<
    id, but perhaps I'm not being creative enough. -}
 instance (Monad m) => Category (Lazy m r) where
     id = Lazy $ pipe id
-    Lazy p1' . Lazy p2' = Lazy $ case (p1', p2') of
-        (Yield x1 p1, p2) -> yield x1 >>         p1 <+< p2
-        (M m1, p2) -> lift m1  >>= \p1 -> p1 <+< p2
-        (Pure r1, _) -> Pure r1
-        (p1, Await f2) -> Await (\x -> p1 <+< f2 x)
-        (p1, M m2) -> lift m2  >>= \p2 -> p1 <+< p2
-        (Await f1, Yield x2 p2) -> f1 (Just x2) <+< p2
-        (Await f1, Pure r2) -> finalize r2 (f1 Nothing)
+    Lazy p1' . Lazy p2' = Lazy $ go False False p2' p1'
       where
-        finalize r (Yield x c) = yield x >> finalize r c
-        finalize r (M m) = lift m >>= finalize r
-        finalize _ (Pure r) = return r
-        finalize r (Await _) = return r
+        go _ _ p1 (Pure r) = return r
+        go t1 t2 p1 (Yield x c) = yield x >> go t1 t2 p1 c
+        go t1 t2 p1 (M m) = lift m >>= \p2 -> go t1 t2 p1 p2
+        go t1 t2 (Yield x c) (Await k) = go t1 t2 c $ k (Just x)
+        go t1 t2 (M m) p2@(Await _) = lift m >>= \p1 -> go t1 t2 p1 p2
+        go t1 False p1@(Pure _) (Await k) = go t1 True p1 (k Nothing)
+        go _ True (Pure r) (Await _) = return r
+        go False t2 (Await k) p2@(Await _) = tryAwait >>= \x -> go (isNothing x) t2 (k x) p2
+        go True False p1@(Await _) (Await k) = go True True p1 (k Nothing)
+        go True True p1@(Await _) p2@(Await _) = tryAwait >>= \_ -> {- unreachable -} go True True p1 p2
 
 instance (Monad m) => Category (Strict m r) where
     id = Strict $ pipe id
