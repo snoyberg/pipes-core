@@ -100,9 +100,9 @@ import Control.Categorical.Bifunctor
 import Control.Categorical.Object
 import Control.Category
 import Control.Category.Associative
-import Control.Category.Diagonal
 import Control.Category.Braided
 import Control.Category.Monoidal
+import Control.Category.Multiplicative
 import Control.Monad
 import Control.Monad.Trans
 import Data.Maybe
