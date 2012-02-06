@@ -1,7 +1,8 @@
 {-# LANGUAGE MultiParamTypeClasses, TypeFamilies #-}
 
 module Control.Pipe.Monoidal (
-  IFunctor(..)
+  IFunctor(..),
+  loopP,
   ) where
 
 import Control.Categorical.Bifunctor
@@ -79,3 +80,13 @@ instance Monad m => Comultiplicative (Lazy m r) Either where
 instance Monad m => Multiplicative (Lazy m r) Either where
   unit = arr absurd
   mult = arr $ either id id
+
+loopP :: Monad m => Pipe (Either a c) (Either b c) m r -> Pipe a b m r
+loopP (Pure r) = return r
+loopP (M m) = lift m >>= loopP
+loopP (Await k) = tryAwait >>= \x -> loopP (k $ liftM Left x)
+loopP (Yield x c) = case x of
+  Left x -> yield x >> loopP c
+  Right z -> loopP (feed (Right z) c)
+  where
+    feed x p = (yield x >> idP) >+> p
