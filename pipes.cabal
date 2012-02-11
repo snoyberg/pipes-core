@@ -60,10 +60,16 @@ Source-Repository head
     Location: https://github.com/Gabriel439/Haskell-Pipes-Library
 
 Library
-    Build-Depends: base >= 4 && < 5, mtl, categories, void
+    Build-Depends: base >= 4 && < 5
+                 , mtl
+                 , categories
+                 , void
+                 , lifted-base
+                 , monad-control
     Exposed-Modules: Control.Pipe
                    , Control.Pipe.Common
                    , Control.Pipe.Monoidal
+                   , Control.Pipe.Resumable
     Other-Modules: Control.Category.Multiplicative
     GHC-Options: -O2
     Default-Language: Haskell2010
