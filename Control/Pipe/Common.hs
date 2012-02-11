@@ -29,7 +29,7 @@ module Control.Pipe.Common (
     {-|
         There are two possible category implementations for 'Pipe':
 
-        ['Lazy' composition]
+        ['PipeC' composition]
 
             * Use as little input as possible
 
@@ -53,43 +53,25 @@ module Control.Pipe.Common (
 
         Both categories prioritize downstream effects over upstream effects.
     -}
-    Lazy(..),
-    Strict(..),
+    PipeC(..),
     -- ** Compose Pipes
     {-|
         I provide convenience functions for composition that take care of
         newtype wrapping and unwrapping.  For example:
 
-> p1 <+< p2 = unLazy $ Lazy p1 <<< Lazy p2
+> p1 <+< p2 = unPipeC $ PipeC p1 <<< PipeC p2
 
-        '<+<' and '<-<' correspond to '<<<' from @Control.Category@
+        '<+<' corresponds to '<<<' from @Control.Category@
 
-        '>+>' and '>+>' correspond to '>>>' from @Control.Category@
-
-        '<+<' and '>+>' use 'Lazy' composition (Mnemonic: + for optimistic
-        evaluation)
-
-        '<-<' and '>->' use 'Strict' composition (Mnemonic: - for pessimistic
-        evaluation) 
+        '>+>' corresponds to '>>>' from @Control.Category@
 
         However, the above operators won't work with 'id' because they work on
-        'Pipe's whereas 'id' is a newtype on a 'Pipe'.  However, both 'Category'
-        instances share the same 'id' implementation:
-
-> instance Category (Lazy m r) where
->     id = Lazy $ pipe id
->     ....
-> instance Category (Strict m r) where
->     id = Strict $ pipe id
->     ...
-
-        So if you need an identity 'Pipe' that works with the above convenience
-        operators, you can use 'idP' which is just @pipe id@.
+        'Pipe's whereas 'id' is a 'PipeC'. So if you need an identity 'Pipe'
+        that works with the above convenience operators, you can use 'idP'
+        which is just @pipe id@.
     -}
     (<+<),
     (>+>),
-    (<-<),
-    (>->),
     idP,
     -- * Run Pipes
     runPipe
@@ -197,30 +179,24 @@ pipe f = forever $ await >>= yield . f
 discard :: (Monad m) => Pipe a b m r
 discard = forever await
 
-newtype Lazy   m r a b = Lazy   { unLazy   :: Pipe a b m r}
-newtype Strict m r a b = Strict { unStrict :: Pipe a b m r}
+newtype PipeC m r a b = PipeC { unPipeC :: Pipe a b m r}
 
 idP :: (Monad m) => Pipe a a m r
 idP = pipe id
 
-(<+<), (<-<) :: (Monad m) => Pipe b c m r -> Pipe a b m r -> Pipe a c m r
-p1 <+< p2 = unLazy   (Lazy   p1 <<< Lazy   p2)
-p1 <-< p2 = unStrict (Strict p1 <<< Strict p2)
+(<+<) :: (Monad m) => Pipe b c m r -> Pipe a b m r -> Pipe a c m r
+p1 <+< p2 = unPipeC (PipeC p1 <<< PipeC p2)
 
-(>+>), (>->) :: (Monad m) => Pipe a b m r -> Pipe b c m r -> Pipe a c m r
-p1 >+> p2 = unLazy   (Lazy   p1 >>> Lazy   p2)
-p1 >-> p2 = unStrict (Strict p1 >>> Strict p2)
+(>+>) :: (Monad m) => Pipe a b m r -> Pipe b c m r -> Pipe a c m r
+p1 >+> p2 = unPipeC (PipeC p1 >>> PipeC p2)
 
 -- These associativities help composition detect termination quickly
-infixr 9 <+<, >->
-infixl 9 >+>, <-<
+infixr 9 <+<
+infixl 9 >+>
 
-{- If you assume id = forever $ await >>= yield, then the below are the only two
-   Category instances possible.  I couldn't find any other useful definition of
-   id, but perhaps I'm not being creative enough. -}
-instance (Monad m) => Category (Lazy m r) where
-    id = Lazy $ pipe id
-    Lazy p1' . Lazy p2' = Lazy $ go False False p2' p1'
+instance (Monad m) => Category (PipeC m r) where
+    id = PipeC $ pipe id
+    PipeC p1' . PipeC p2' = PipeC $ go False False p2' p1'
       where
         go _ _ p1 (Pure r) = return r
         go t1 t2 p1 (Yield x c) = yield x >> go t1 t2 p1 c
@@ -233,10 +209,6 @@ instance (Monad m) => Category (Lazy m r) where
         go True False p1@(Await _) (Await k) = go True True p1 (k Nothing)
         go True True p1@(Await _) p2@(Await _) = tryAwait >>= \_ -> {- unreachable -} go True True p1 p2
 
-instance (Monad m) => Category (Strict m r) where
-    id = Strict $ pipe id
-    Strict p1 . Strict p2 = Strict $ (p1 >> discard) <+< p2
-
 {-|
     Run the 'Pipe' monad transformer, converting it back into the base monad
 
@@ -247,9 +219,7 @@ instance (Monad m) => Category (Strict m r) where
 -}
 runPipe :: (Monad m) => Pipeline m r -> m r
 runPipe p' = case p' of
-    Pure r          -> return r
-    M mp            -> mp >>= runPipe
-    -- Technically a blocked Pipe can still await
-    Await f         -> runPipe $ f (Just ())
-    -- A blocked Pipe can not yield, but I include this as a precaution
-    Yield _ p       -> runPipe p
+    Pure r    -> return r
+    M mp      -> mp >>= runPipe
+    Await f   -> runPipe $ f (Just ())
+    Yield x _ -> absurd x
