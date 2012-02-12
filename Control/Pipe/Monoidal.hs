@@ -116,15 +116,15 @@ instance Monad m => Comultiplicative (PipeC m r) Either where
     where
       yield2 x = yield (Left x) >> yield (Right x)
 
-joinP :: Monad m => Pipe a (Either a a) m r
-joinP = unPipeC comult
+splitP :: Monad m => Pipe a (Either a a) m r
+splitP = unPipeC comult
 
 instance Monad m => Multiplicative (PipeC m r) Either where
   unit = arr absurd
   mult = arr $ either id id
 
-splitP :: Monad m => Pipe (Either a a) a m r
-splitP = unPipeC mult
+joinP :: Monad m => Pipe (Either a a) a m r
+joinP = unPipeC mult
 
 loopP :: Monad m => Pipe (Either a c) (Either b c) m r -> Pipe a b m r
 loopP (Pure r) = return r
