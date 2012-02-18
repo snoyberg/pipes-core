@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveDataTypeable, Rank2Types #-}
+{-# LANGUAGE DeriveDataTypeable, Rank2Types, ScopedTypeVariables #-}
 module Control.Pipe.Guarded2 where
 
 import Control.Exception (SomeException, Exception)
@@ -7,6 +7,7 @@ import Control.Monad
 import Control.Monad.Free
 import Data.Typeable
 import Data.Void
+import Prelude hiding (catch)
 
 data BrokenPipe = BrokenPipe
   deriving (Show, Typeable)
@@ -48,6 +49,12 @@ catch p h = catchP p $ \e -> case E.fromException e of
   Nothing -> return $ throw e
   Just e' -> h e'
 
+catch_ :: (Monad m, Exception e)
+       => Pipe a b m r
+       -> (e -> Pipe a b m r)
+       -> Pipe a b m r
+catch_ p h = catch p (return . h)
+
 throw :: (Monad m, Exception e) => e -> Pipe a b m r
 throw e = liftF . Throw . E.toException $ e
 
@@ -62,6 +69,9 @@ catchP p h = go p
 
 await :: Monad m => Pipe a b m a
 await = liftF $ Await id
+
+tryAwait :: Monad m => Pipe a b m (Maybe a)
+tryAwait = catch_ (liftM Just await) $ \(e :: BrokenUpstreamPipe) -> return Nothing
 
 yield :: Monad m => b -> Pipe a b m ()
 yield x = liftF $ Yield x ()
