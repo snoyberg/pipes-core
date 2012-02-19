@@ -1,5 +1,29 @@
 {-# LANGUAGE DeriveDataTypeable, Rank2Types, ScopedTypeVariables #-}
-module Control.Pipe.Common where
+module Control.Pipe.Common (
+  BrokenDownstreamPipe,
+  BrokenUpstreamPipe,
+  PipeF(..),
+  Pipe,
+  throw,
+  catchP,
+  catch,
+  catchM,
+  catch_,
+  onException,
+  finally,
+  bracket,
+  await,
+  yield,
+  lift,
+  MaskState(..),
+  lift_,
+  tryAwait,
+  pipe,
+  idP,
+  discard,
+  (>+>), (<+<),
+  runPipe
+  ) where
 
 import Control.Category
 import Control.Exception (SomeException, Exception)
@@ -10,13 +34,13 @@ import Data.Typeable
 import Data.Void
 import Prelude hiding (id, (.), catch)
 
-data BrokenPipe = BrokenPipe
+data BrokenDownstreamPipe = BrokenDownstreamPipe
   deriving (Show, Typeable)
 
-brokenPipe :: SomeException
-brokenPipe = E.toException BrokenPipe
+brokenDownstreamPipe :: SomeException
+brokenDownstreamPipe = E.toException BrokenDownstreamPipe
 
-instance Exception BrokenPipe
+instance Exception BrokenDownstreamPipe
 
 data BrokenUpstreamPipe = BrokenUpstreamPipe
   deriving (Show, Typeable)
@@ -173,7 +197,7 @@ finalizeL :: Monad m
   -> Pipe a c m x
 
 -- second pipe terminated
-finalizeL (Catch p1 h) r = finalizeL p1 r >> lift_ Masked (h brokenPipe)
+finalizeL (Catch p1 h) r = finalizeL p1 r >> lift_ Masked (h brokenDownstreamPipe)
 finalizeL _ r = return r
 
 infixl 9 >+>
@@ -203,4 +227,3 @@ runPipe p = E.mask $ \restore -> go p restore
       Left e -> liftM Right $ h e
       Right p' -> return (Right p')
     step (Throw e) _ = return $ Left e
-
