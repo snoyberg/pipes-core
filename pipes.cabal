@@ -69,7 +69,7 @@ Library
                  , monad-control
     Exposed-Modules: Control.Pipe
                    , Control.Pipe.Common
-                   , Control.Pipe.Monoidal
+                   , Control.Pipe.Category
     Other-Modules: Control.Category.Multiplicative
     GHC-Options: -O2
     Default-Language: Haskell2010

@@ -1,6 +1,7 @@
 {-# LANGUAGE MultiParamTypeClasses, TypeFamilies #-}
 
-module Control.Pipe.Monoidal (
+module Control.Pipe.Category (
+  PipeC(..),
   IFunctor(..),
   firstP,
   secondP,
@@ -26,6 +27,13 @@ import Control.Monad.Free
 import Control.Pipe.Common
 import Data.Void
 import Prelude hiding ((.), id)
+
+-- category instance
+newtype PipeC m r a b = PipeC { unPipeC :: Pipe a b m r }
+
+instance Monad m => Category (PipeC m r) where
+  id = PipeC idP
+  PipeC p2 . PipeC p1 = PipeC (p2 <+< p1)
 
 -- | Identity-on-objects functor.
 --

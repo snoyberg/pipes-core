@@ -204,10 +204,3 @@ runPipe p = E.mask $ \restore -> go p restore
       Right p' -> return (Right p')
     step (Throw e) _ = return $ Left e
 
--- category instance
-
-newtype PipeC m r a b = PipeC { unPipeC :: Pipe a b m r }
-
-instance Monad m => Category (PipeC m r) where
-  id = PipeC idP
-  PipeC p2 . PipeC p1 = PipeC (p2 <+< p1)
