@@ -66,16 +66,22 @@ catch_ p h = catch p (return . h)
 throw :: (Monad m, Exception e) => e -> Pipe a b m r
 throw e = liftF . Throw . E.toException $ e
 
+onException :: Monad m
+            => Pipe a b m r
+            -> m (Pipe a b m s)
+            -> Pipe a b m r
+onException p w = catchP p h
+  where
+    h e = w >>= \p' -> return $ p' >> throw e
+
 finally :: Monad m
         => Pipe a b m r
         -> m (Pipe a b m s)
         -> Pipe a b m r
 finally p w = do
-  r <- catchP p h
+  r <- onException p w
   join $ lift_ Masked w
   return r
-  where
-    h e = w >>= \p' -> return $ p' >> throw e
 
 finallyM :: Monad m
          => Pipe a b m r
@@ -88,6 +94,17 @@ finally_ :: Monad m
          -> Pipe a b m s
          -> Pipe a b m r
 finally_ p w = finally p (return w)
+
+bracket :: Monad m
+        => m r
+        -> (r -> m y)
+        -> (r -> Pipe a b m x)
+        -> Pipe a b m x
+bracket open close run = do
+  r <- lift_ Masked open
+  x <- onException (run r) (liftM return (close r))
+  lift_ Masked $ close r
+  return x
 
 catchP :: Monad m
        => Pipe a b m r
