@@ -49,6 +49,12 @@ catch p h = catchP p $ \e -> case E.fromException e of
   Nothing -> return $ throw e
   Just e' -> h e'
 
+catchM :: (Monad m, Exception e)
+       => Pipe a b m r
+       -> (e -> m r)
+       -> Pipe a b m r
+catchM p h = catch p (liftM return . h)
+
 catch_ :: (Monad m, Exception e)
        => Pipe a b m r
        -> (e -> Pipe a b m r)
@@ -57,6 +63,29 @@ catch_ p h = catch p (return . h)
 
 throw :: (Monad m, Exception e) => e -> Pipe a b m r
 throw e = liftF . Throw . E.toException $ e
+
+finally :: Monad m
+        => Pipe a b m r
+        -> m (Pipe a b m s)
+        -> Pipe a b m r
+finally p w = do
+  r <- catchP p h
+  join $ lift_ w
+  return r
+  where
+    h e = w >>= \p' -> return $ p' >> throw e
+
+finallyM :: Monad m
+         => Pipe a b m r
+         -> m s
+         -> Pipe a b m r
+finallyM p w = finally p (liftM return w)
+
+finally_ :: Monad m
+         => Pipe a b m r
+         -> Pipe a b m s
+         -> Pipe a b m r
+finally_ p w = finally p (return w)
 
 catchP :: Monad m
        => Pipe a b m r
@@ -71,7 +100,7 @@ await :: Monad m => Pipe a b m a
 await = liftF $ Await id
 
 tryAwait :: Monad m => Pipe a b m (Maybe a)
-tryAwait = catch_ (liftM Just await) $ \(e :: BrokenUpstreamPipe) -> return Nothing
+tryAwait = catch_ (liftM Just await) $ \(_ :: BrokenUpstreamPipe) -> return Nothing
 
 yield :: Monad m => b -> Pipe a b m ()
 yield x = liftF $ Yield x ()
