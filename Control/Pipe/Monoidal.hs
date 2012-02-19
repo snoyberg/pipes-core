@@ -16,14 +16,13 @@ module Control.Pipe.Monoidal (
   ) where
 
 import Control.Categorical.Bifunctor
-import Control.Categorical.Object
 import Control.Category
 import Control.Category.Associative
 import Control.Category.Braided
 import Control.Category.Monoidal
 import Control.Category.Multiplicative
 import Control.Monad
-import Control.Monad.Trans
+import Control.Monad.Free
 import Control.Pipe.Common
 import Data.Void
 import Prelude hiding ((.), id)
@@ -40,28 +39,38 @@ instance Monad m => IFunctor (PipeC m r) where
 instance Monad m => PFunctor Either (PipeC m r) (PipeC m r) where
   first = PipeC . firstP . unPipeC where
 
+firstP :: Monad m
+       => Pipe a b m r
+       -> Pipe (Either a c) (Either b c) m r
 firstP (Pure r) = return r
-firstP (M m) = lift m >>= firstP
-firstP (Await k) = go
+firstP (Free c) = step c >>= firstP
   where
-    go = tryAwait >>= maybe
-                        (firstP $ k Nothing)
-                        (either (firstP . k . Just)
-                                (yield . Right >=> const go))
-firstP (Yield x c) = yield (Left x) >> firstP c
+    step (M m s) = lift_ s m
+    step (Yield b x) = yield (Left b) >> return x
+    step (Throw e) = throw e
+    step (Catch s h) = catchP (step s) (liftM return . h)
+    step (Await k) = go
+      where
+        go = await >>= either (return . k)
+                              (yield . Right >=> const go)
 
 instance Monad m => QFunctor Either (PipeC m r) (PipeC m r) where
   second = PipeC . secondP . unPipeC where
 
+secondP :: Monad m
+        => Pipe a b m r
+        -> Pipe (Either c a) (Either c b) m r
 secondP (Pure r) = return r
-secondP (M m) = lift m >>= secondP
-secondP (Await k) = go
+secondP (Free c) = step c >>= secondP
   where
-    go = tryAwait >>= maybe
-                        (secondP $ k Nothing)
-                        (either (yield . Left >=> const go)
-                                (secondP . k . Just))
-secondP (Yield x c) = yield (Right x) >> secondP c
+    step (M m s) = lift_ s m
+    step (Yield b x) = yield (Right b) >> return x
+    step (Throw e) = throw e
+    step (Catch s h) = catchP (step s) (liftM return . h)
+    step (Await k) = go
+      where
+        go = await >>= either (yield . Left >=> const go)
+                              (return . k)
 
 instance Monad m => Bifunctor Either (PipeC m r) (PipeC m r) (PipeC m r) where
   bimap f g = first f >>> second g
@@ -128,10 +137,15 @@ joinP = unPipeC mult
 
 loopP :: Monad m => Pipe (Either a c) (Either b c) m r -> Pipe a b m r
 loopP (Pure r) = return r
-loopP (M m) = lift m >>= loopP
-loopP (Await k) = tryAwait >>= \x -> loopP (k $ liftM Left x)
-loopP (Yield x c) = case x of
-  Left x -> yield x >> loopP c
-  Right z -> loopP (feed (Right z) c)
+loopP (Free c) = case step c of
+  (z, m) -> m >>= \p -> loopP (feeder z >+> p)
   where
-    feed x p = (yield x >> idP) >+> p
+    feeder z = maybe (return ()) (yield . Right) z >> idP
+
+    step (M m s) = (Nothing, lift_ s m)
+    step (Await k) = (Nothing, liftM (k . Left) await)
+    step (Yield (Left b) x) = (Nothing, yield b >> return x)
+    step (Yield (Right z) x) = (Just z, return x)
+    step (Catch s h) = (z, catchP s' (liftM return . h))
+      where (z, s') = step s
+    step (Throw e) = (Nothing, throw e)
