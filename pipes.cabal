@@ -69,7 +69,6 @@ Library
     Exposed-Modules: Control.Pipe
                    , Control.Pipe.Common
                    , Control.Pipe.Monoidal
-                   , Control.Pipe.Resumable
     Other-Modules: Control.Category.Multiplicative
     GHC-Options: -O2
     Default-Language: Haskell2010
