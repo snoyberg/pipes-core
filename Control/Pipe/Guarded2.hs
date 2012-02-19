@@ -76,24 +76,12 @@ onException p w = catchP p h
 
 finally :: Monad m
         => Pipe a b m r
-        -> m (Pipe a b m s)
+        -> m s
         -> Pipe a b m r
 finally p w = do
-  r <- onException p w
-  join $ lift_ Masked w
+  r <- onException p (liftM return w)
+  lift_ Masked w
   return r
-
-finallyM :: Monad m
-         => Pipe a b m r
-         -> m s
-         -> Pipe a b m r
-finallyM p w = finally p (liftM return w)
-
-finally_ :: Monad m
-         => Pipe a b m r
-         -> Pipe a b m s
-         -> Pipe a b m r
-finally_ p w = finally p (return w)
 
 bracket :: Monad m
         => m r
