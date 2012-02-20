@@ -161,6 +161,19 @@ compose :: Monad m
         (Free (PipeF a b m) x,
          Free (PipeF b c m) y)
 
+-- first pipe running
+compose (Yield b x) (Await k) = return (return x, return (k b))
+compose (M m s) p2@(Await _) = lift_ s m >>= \x -> return (return x, liftF p2)
+compose (Catch p1 h) p2@(Await _) = catchP (compose p1 p2) (h >=> k)
+  where k x = return (return (return x, liftF p2))
+compose (Catch p1 h) p2@(Catch (Await _) _) = catch (compose p1 p2) (h >=> k)
+  where k x = return (return (return x, liftF p2))
+compose (Throw e) (Await _) = throw e
+compose p1 p2@(Catch (Await k) h) = do
+  (p1', p2') <- catchP (compose p1 (Await k)) h'
+  return (p1', liftF p2)
+  where h' e = h e >>= \y -> return (return (throw e, return y))
+
 -- second pipe running
 compose p1 (Yield c y) = yield c >> return (liftF p1, return y)
 compose p1 (M m s) = lift_ s m >>= \y -> return (liftF p1, return y)
@@ -169,13 +182,6 @@ compose p1 (Catch p2 h) = catchP (compose p1 p2) (h >=> k)
 compose (Catch _ h) p2@(Throw e) = lift_ Masked (h e) >>= k
   where k x = return (return x, liftF p2)
 compose _ (Throw e) = throw e
-
--- first pipe running
-compose (Yield b x) (Await k) = return (return x, return (k b))
-compose (M m s) p2 = lift_ s m >>= \x -> return (return x, liftF p2)
-compose (Catch p1 h) p2 = catchP (compose p1 p2) (h >=> k)
-  where k x = return (return (return x, liftF p2))
-compose (Throw e) _ = throw e
 
 -- both pipes awaiting
 compose (Await k) p2 = await >>= \a -> return (return (k a), liftF p2)
