@@ -197,7 +197,9 @@ finalizeR _ (Yield c x) = yield c >> return x
 finalizeR _ (M m s) = lift_ s m
 finalizeR _ (Catch (Await _) h) = lift_ Masked (h brokenUpstreamPipe)
 finalizeR r (Catch p2 h) = catchP (finalizeR r p2) (h >=> return . Pure)
-finalizeR _ (Throw e) = throw e
+finalizeR r (Throw e) = case E.fromException e :: Maybe BrokenUpstreamPipe of
+  Nothing -> throw e
+  Just _  -> return r
 
 finalizeL :: Monad m
   => PipeF a b m x
