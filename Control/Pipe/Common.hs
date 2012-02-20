@@ -22,7 +22,8 @@ module Control.Pipe.Common (
   idP,
   discard,
   (>+>), (<+<),
-  runPipe
+  runPipe,
+  Void
   ) where
 
 import Control.Category
