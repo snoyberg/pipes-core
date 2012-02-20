@@ -23,7 +23,7 @@ module Control.Pipe.Common (
   discard,
   (>+>), (<+<),
   runPipe,
-  Void
+  Void,
   ) where
 
 import Control.Category
@@ -228,3 +228,4 @@ runPipe p = E.mask $ \restore -> go p restore
       Left e -> liftM Right $ h e
       Right p' -> return (Right p')
     step (Throw e) _ = return $ Left e
+
