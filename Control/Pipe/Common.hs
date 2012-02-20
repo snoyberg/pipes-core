@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveDataTypeable, Rank2Types, ScopedTypeVariables #-}
+{-# LANGUAGE DeriveDataTypeable, Rank2Types, ScopedTypeVariables, FlexibleContexts #-}
 module Control.Pipe.Common (
   BrokenDownstreamPipe,
   BrokenUpstreamPipe,
@@ -28,9 +28,10 @@ module Control.Pipe.Common (
 
 import Control.Category
 import Control.Exception (SomeException, Exception)
-import qualified Control.Exception as E
+import qualified Control.Exception.Lifted as E
 import Control.Monad
 import Control.Monad.Free
+import Control.Monad.Trans.Control
 import Data.Typeable
 import Data.Void
 import Prelude hiding (id, (.), catch)
@@ -212,7 +213,9 @@ infixr 9 <+<
 (<+<) :: Monad m => Pipe b c m r -> Pipe a b m r -> Pipe a c m r
 p2 <+< p1 = p1 >+> p2
 
-runPipe :: Pipe () Void IO r -> IO r
+runPipe :: MonadBaseControl IO m
+        => Pipe () Void m r
+        -> m r
 runPipe p = E.mask $ \restore -> go p restore
   where
     go (Pure r) _ = return r
@@ -228,4 +231,3 @@ runPipe p = E.mask $ \restore -> go p restore
       Left e -> liftM Right $ h e
       Right p' -> return (Right p')
     step (Throw e) _ = return $ Left e
-
