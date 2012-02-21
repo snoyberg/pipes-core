@@ -68,7 +68,7 @@ instance Monad m => Functor (PipeF a b m) where
   fmap f (Catch e h) = Catch (fmap f e) (liftM f . h)
   fmap _ (Throw e) = Throw e
 
-type Pipe a b m r = Free (PipeF a b m) r
+type Pipe a b m = Free (PipeF a b m)
 
 catch :: (Monad m, Exception e)
       => Pipe a b m r
@@ -154,37 +154,64 @@ idP = pipe id
 discard :: Monad m => Pipe a b m r
 discard = forever await
 
+data CompositionKind
+  = AdvanceFirst
+  | AdvanceSecond
+  | AdvanceBoth
+
+data Composition a b c m x y = Composition
+  CompositionKind
+  (Pipe a c m (Pipe a b m x, Pipe b c m y))
+
+cresult :: Composition a b c m x y
+        -> Pipe a c m (Pipe a b m x, Pipe b c m y)
+cresult (Composition _ r) = r
+
+advanceFirst :: Monad m => Pipe a c m x -> PipeF b c m y -> Composition a b c m x y
+advanceFirst p1 p2 = Composition AdvanceFirst $
+  liftM (\x -> (return x, liftF p2)) p1
+
+advanceSecond :: Monad m => PipeF a b m x -> Pipe a c m y -> Composition a b c m x y
+advanceSecond p1 p2 = Composition AdvanceSecond $
+  liftM (\y -> (liftF p1, return y)) p2
+
+advanceBoth :: Monad m => Pipe a c m x -> Pipe a c m y -> Composition a b c m x y
+advanceBoth p1 p2 = Composition AdvanceBoth $
+  liftM2 (\x y -> (return x, return y)) p1 p2
+
 compose :: Monad m
    => PipeF a b m x
    -> PipeF b c m y
-   -> Free (PipeF a c m)
-        (Free (PipeF a b m) x,
-         Free (PipeF b c m) y)
+   -> Composition a b c m x y
+
+-- catch
+compose p1 (Catch s h) =
+  let Composition k result = compose p1 s
+  in Composition k $ case k of
+    AdvanceFirst -> catchP result $ \e ->
+      h e >>= \y -> return (return (throw e, return y))
+    AdvanceSecond -> catchP result $ \e ->
+      h e >>= \y -> return (return (liftF p1, return y))
+    AdvanceBoth -> result
+compose (Catch s h) p2 =
+  let Composition k result = compose s p2
+  in Composition k $ case k of
+    AdvanceFirst -> catchP result $ \e ->
+      h e >>= \x -> return (return (return x, liftF p2))
+    AdvanceSecond -> catchP result $ \e ->
+      h e >>= \x -> return (return (return x, throw e))
+    AdvanceBoth -> result
 
 -- first pipe running
-compose (Yield b x) (Await k) = return (return x, return (k b))
-compose (M m s) p2@(Await _) = lift_ s m >>= \x -> return (return x, liftF p2)
-compose (Catch p1 h) p2@(Await _) = catchP (compose p1 p2) (h >=> k)
-  where k x = return (return (return x, liftF p2))
-compose (Catch p1 h) p2@(Catch (Await _) _) = catch (compose p1 p2) (h >=> k)
-  where k x = return (return (return x, liftF p2))
-compose (Throw e) (Await _) = throw e
-compose p1 p2@(Catch (Await k) h) = do
-  (p1', p2') <- catchP (compose p1 (Await k)) h'
-  return (p1', liftF p2)
-  where h' e = h e >>= \y -> return (return (throw e, return y))
+compose (Yield b x) (Await k) = advanceBoth (return x) (return (k b))
+compose (M m s) p2@(Await _) = advanceFirst (lift_ s m) p2
+compose (Throw e) p2@(Await _) = advanceFirst (throw e) p2
+compose (Await k) p2@(Await _) = advanceFirst (liftM k await) p2
 
 -- second pipe running
-compose p1 (Yield c y) = yield c >> return (liftF p1, return y)
-compose p1 (M m s) = lift_ s m >>= \y -> return (liftF p1, return y)
-compose p1 (Catch p2 h) = catchP (compose p1 p2) (h >=> k)
-  where k y = return (return (liftF p1, return y))
-compose (Catch _ h) p2@(Throw e) = lift_ Masked (h e) >>= k
-  where k x = return (return x, liftF p2)
-compose _ (Throw e) = throw e
-
--- both pipes awaiting
-compose (Await k) p2 = await >>= \a -> return (return (k a), liftF p2)
+compose p1 (Yield c y) = advanceSecond p1 (yield c >> return y)
+compose p1 (M m s) = advanceSecond p1 (lift_ s m)
+compose p1 (Throw e) = advanceSecond p1 (throw e)
 
 finalizeR :: Monad m
   => x
@@ -192,14 +219,16 @@ finalizeR :: Monad m
   -> Pipe a c m x
 
 -- first pipe terminated
-finalizeR r (Await _) = return r
-finalizeR _ (Yield c x) = yield c >> return x
-finalizeR _ (M m s) = lift_ s m
-finalizeR _ (Catch (Await _) h) = lift_ Masked (h brokenUpstreamPipe)
-finalizeR r (Catch p2 h) = catchP (finalizeR r p2) (h >=> return . Pure)
-finalizeR r (Throw e) = case E.fromException e :: Maybe BrokenUpstreamPipe of
-  Nothing -> throw e
-  Just _  -> return r
+finalizeR r c = let result = go c in case result of
+  Free (Throw e) -> case E.fromException e :: Maybe BrokenUpstreamPipe of
+    Nothing -> throw e
+    Just _  -> return r
+  _ -> result
+  where go (Await _) = throw brokenUpstreamPipe
+        go (Yield z x) = yield z >> return x
+        go (M m s) = lift_ s m
+        go (Catch p2 h) = catchP (go p2) (liftM return . h)
+        go (Throw e) = throw e
 
 finalizeL :: Monad m
   => PipeF a b m x
@@ -207,12 +236,18 @@ finalizeL :: Monad m
   -> Pipe a c m x
 
 -- second pipe terminated
-finalizeL (Catch p1 h) r = finalizeL p1 r >> lift_ Masked (h brokenDownstreamPipe)
-finalizeL _ r = return r
+finalizeL c r = let result = go c in case result of
+  Free (Throw e) -> case E.fromException e :: Maybe BrokenDownstreamPipe of
+    Nothing -> throw e
+    Just _  -> return r
+  _ -> result
+  where
+    go (Catch p1 h) = catchP (go p1) (liftM return . h)
+    go _ = throw brokenDownstreamPipe
 
 infixl 9 >+>
 (>+>) :: Monad m => Pipe a b m r -> Pipe b c m r -> Pipe a c m r
-Free c1 >+> Free c2 = compose c1 c2 >>= \(p1', p2') -> join p1' >+> join p2'
+Free c1 >+> Free c2 = cresult (compose c1 c2) >>= \(p1', p2') -> join p1' >+> join p2'
 p1@(Pure r) >+> (Free c) = finalizeR (Pure r) c >>= \p2 -> p1 >+> p2
 Free c >+> p2@(Pure r) = finalizeL c (Pure r) >>= \p1 -> p1 >+> p2
 _ >+> Pure r = return r
