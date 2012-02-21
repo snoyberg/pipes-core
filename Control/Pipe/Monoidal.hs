@@ -127,11 +127,12 @@ joinP :: Monad m => Pipe (Either a a) a m r
 joinP = unPipeC mult
 
 loopP :: Monad m => Pipe (Either a c) (Either b c) m r -> Pipe a b m r
-loopP (Pure r) = return r
-loopP (M m) = lift m >>= loopP
-loopP (Await k) = tryAwait >>= \x -> loopP (k $ liftM Left x)
-loopP (Yield x c) = case x of
-  Left x -> yield x >> loopP c
-  Right z -> loopP (feed (Right z) c)
+loopP = go [] []
   where
-    feed x p = (yield x >> idP) >+> p
+    go _ _ (Pure r) = return r
+    go xs ys (M m) = lift m >>= go xs ys
+    go [] [] (Await k) = tryAwait >>= \x -> go [] [] (k $ liftM Left x)
+    go (x : xs) ys (Await k) = go xs ys (k . Just . Right $ x)
+    go [] ys p@(Await _) = go (reverse ys) [] p
+    go xs ys (Yield (Left x) c) = yield x >> go xs ys c
+    go xs ys (Yield (Right y) c) = go xs (y : ys) c
