@@ -143,7 +143,7 @@ lift_ :: Monad m => MaskState -> m r -> Pipe a b m r
 lift_ s m = Free $ M (liftM Pure m) s
 
 lift :: Monad m => m r -> Pipe a b m r
-lift m = Free $ Catch (M (liftM Pure m) Unmasked) (return . throw)
+lift = lift_ Unmasked
 
 pipe :: Monad m => (a -> b) -> Pipe a b m r
 pipe f = forever $ await >>= yield . f
