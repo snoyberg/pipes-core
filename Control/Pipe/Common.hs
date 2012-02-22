@@ -185,20 +185,22 @@ compose :: Monad m
    -> Composition a b c m x y
 
 -- catch
-compose p1 (Catch s h) =
+compose p1 p2@(Catch s h) =
   let Composition k result = compose p1 s
+      result' = result >>= \(p1', _) -> return (p1', liftF p2)
   in Composition k $ case k of
-    AdvanceFirst -> catchP result $ \e ->
+    AdvanceFirst -> catchP result' $ \e ->
       h e >>= \y -> return (return (throw e, return y))
     AdvanceSecond -> catchP result $ \e ->
       h e >>= \y -> return (return (liftF p1, return y))
     AdvanceBoth -> result
-compose (Catch s h) p2 =
+compose p1@(Catch s h) p2 =
   let Composition k result = compose s p2
+      result' = result >>= \(_, p2') -> return (liftF p1, p2')
   in Composition k $ case k of
     AdvanceFirst -> catchP result $ \e ->
       h e >>= \x -> return (return (return x, liftF p2))
-    AdvanceSecond -> catchP result $ \e ->
+    AdvanceSecond -> catchP result' $ \e ->
       h e >>= \x -> return (return (return x, throw e))
     AdvanceBoth -> result
 
