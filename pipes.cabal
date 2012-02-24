@@ -72,5 +72,4 @@ Library
                    , Control.Pipe.Category
                    , Control.Pipe.Monoidal
     Other-Modules: Control.Category.Multiplicative
-    GHC-Options: -O2
     Default-Language: Haskell2010
