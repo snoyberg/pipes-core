@@ -1,225 +1,286 @@
-{-# LANGUAGE MultiParamTypeClasses, TypeFamilies #-}
-
+{-# LANGUAGE DeriveDataTypeable, Rank2Types, ScopedTypeVariables, FlexibleContexts #-}
 module Control.Pipe.Common (
-    -- * Types
-    Pipe(..),
-    Producer,
-    Consumer,
-    Pipeline,
-    -- * Create Pipes
-    {-|
-        'yield' and 'await' are the only two primitives you need to create
-        'Pipe's.  Because 'Pipe' is a monad, you can assemble them using
-        ordinary @do@ notation.  Since 'Pipe' is also a monad transformer, you
-        can use 'lift' to invoke the base monad.  For example:
+  BrokenDownstreamPipe,
+  BrokenUpstreamPipe,
+  PipeF(..),
+  Pipe,
+  throw,
+  catchP,
+  catch,
+  catchM,
+  catch_,
+  onException,
+  finally,
+  bracket,
+  await,
+  yield,
+  lift,
+  MaskState(..),
+  lift_,
+  tryAwait,
+  pipe,
+  idP,
+  discard,
+  (>+>), (<+<),
+  runPipe,
+  runPurePipe,
+  runPurePipe_,
+  Void,
+  ) where
 
-> check :: Pipe a a IO r
-> check = forever $ do
->     x <- await
->     lift $ putStrLn $ "Can " ++ (show x) ++ " pass?"
->     ok <- lift $ read <$> getLine
->     when ok (yield x)
-    -}
-    await,
-    tryAwait,
-    yield,
-    pipe,
-    discard,
-    -- * Compose Pipes
-    {-|
-        There are two possible category implementations for 'Pipe':
-
-        ['PipeC' composition]
-
-            * Use as little input as possible
-
-            * Ideal for infinite input streams that never need finalization
-
-        ['Strict' composition]
-
-            * Use as much input as possible
-
-            * Ideal for finite input streams that need finalization
-
-        Both category implementations enforce the category laws:
-
-        * Composition is associative (within each instance).  This is not
-          merely associativity of monadic effects, but rather true
-          associativity.  The result of composition produces identical
-          composite 'Pipe's regardless of how you group composition.
-
-        * 'id' is the identity 'Pipe'.  Composing a 'Pipe' with 'id' returns the
-          original pipe.
-
-        Both categories prioritize downstream effects over upstream effects.
-    -}
-    PipeC(..),
-    -- ** Compose Pipes
-    {-|
-        I provide convenience functions for composition that take care of
-        newtype wrapping and unwrapping.  For example:
-
-> p1 <+< p2 = unPipeC $ PipeC p1 <<< PipeC p2
-
-        '<+<' corresponds to '<<<' from @Control.Category@
-
-        '>+>' corresponds to '>>>' from @Control.Category@
-
-        However, the above operators won't work with 'id' because they work on
-        'Pipe's whereas 'id' is a 'PipeC'. So if you need an identity 'Pipe'
-        that works with the above convenience operators, you can use 'idP'
-        which is just @pipe id@.
-    -}
-    (<+<),
-    (>+>),
-    idP,
-    -- * Run Pipes
-    runPipe
-    ) where
-
-import Control.Applicative
 import Control.Category
+import Control.Exception (SomeException, Exception)
+import qualified Control.Exception.Lifted as E
 import Control.Monad
-import Control.Monad.Trans
-import Data.Maybe
+import Control.Monad.Free
+import Control.Monad.Trans.Control
+import Data.Typeable
 import Data.Void
-import Prelude hiding ((.), id)
+import Prelude hiding (id, (.), catch)
 
-{-|
-    The base type for pipes
+data BrokenDownstreamPipe = BrokenDownstreamPipe
+  deriving (Show, Typeable)
 
-    [@a@] The type of input received from upstream pipes
+instance Exception BrokenDownstreamPipe
 
-    [@b@] The type of output delivered to downstream pipes
+data BrokenUpstreamPipe = BrokenUpstreamPipe
+  deriving (Show, Typeable)
 
-    [@m@] The base monad
+instance Exception BrokenUpstreamPipe
 
-    [@r@] The type of the monad's final result
+data MaskState = Masked | Unmasked
 
-    The Pipe type is partly inspired by Mario Blazevic's Coroutine in his
-    concurrency article from Issue 19 of The Monad Reader and partly inspired by
-    the Trace data type from \"A Language Based Approach to Unifying Events and
-    Threads\".
--}
-data Pipe a b m r =
-    Pure r
-  | M (m (Pipe a b m r))
-  | Await (Maybe a -> Pipe a b m r)
-  | Yield b (Pipe a b m r)
-{- I could have factored Pipe as:
+data PipeF a b m x
+  = M (m x) MaskState
+  | Await (a -> x)
+  | Yield b x
+  | Catch (PipeF a b m x) (SomeException -> m x)
+  | Throw SomeException
 
-data Computation f r = Pure r | F (f (Computation f r))
-data PipeF a b m r = Await (a -> r) | Yield (b, r) | M (m r)
-newtype Pipe a b m r = P { unP :: Computation (PipeF a b m) r }
+instance Monad m => Functor (PipeF a b m) where
+  fmap f (M m s) = M (liftM f m) s
+  fmap f (Await k) = Await (f . k)
+  fmap f (Yield b c) = Yield b (f c)
+  fmap f (Catch e h) = Catch (fmap f e) (liftM f . h)
+  fmap _ (Throw e) = Throw e
 
-   This makes the Functor, Applicative, and Monad instances much simpler at the
-   expense of making the Category instances *much* harder to follow because of
-   excessive newtype and constructor wrapping/unwrapping.  Since the Category
-   instance is the meat of the library, I opted to in-line PipeF into
-   computation to make it much simpler.  It's a shame, because the Computation
-   type is very useful in its own right and I will probably create a separate
-   library around it. -}
+type Pipe a b m = Free (PipeF a b m)
 
-instance (Monad m) => Functor (Pipe a b m) where
-    fmap = liftM
+catch :: (Monad m, Exception e)
+      => Pipe a b m r
+      -> (e -> m (Pipe a b m r))
+      -> Pipe a b m r
+catch p h = catchP p $ \e -> case E.fromException e of
+  Nothing -> return $ throw e
+  Just e' -> h e'
 
-instance (Monad m) => Applicative (Pipe a b m) where
-    pure = Pure
-    (<*>) = ap
+catchM :: (Monad m, Exception e)
+       => Pipe a b m r
+       -> (e -> m r)
+       -> Pipe a b m r
+catchM p h = catch p (liftM return . h)
 
-instance (Monad m) => Monad (Pipe a b m) where
-    return = pure
-    m >>= f = case m of
-        Pure r -> f r
-        M mc -> M $ liftM (>>= f) mc
-        Await k -> Await $ \x -> k x >>= f
-        Yield x c -> Yield x (c >>= f)
+catch_ :: (Monad m, Exception e)
+       => Pipe a b m r
+       -> (e -> Pipe a b m r)
+       -> Pipe a b m r
+catch_ p h = catch p (return . h)
 
-instance MonadTrans (Pipe a b) where lift = M . liftM pure
+throw :: (Monad m, Exception e) => e -> Pipe a b m r
+throw e = liftF . Throw . E.toException $ e
 
--- | A pipe that can only produce values
-type Producer b m r = Pipe () b m r
+onException :: Monad m
+            => Pipe a b m r
+            -> m (Pipe a b m s)
+            -> Pipe a b m r
+onException p w = catchP p h
+  where
+    h e = w >>= \p' -> return $ p' >> throw e
 
--- | A pipe that can only consume values
-type Consumer a m r = Pipe a Void m r
+finally :: Monad m
+        => Pipe a b m r
+        -> m s
+        -> Pipe a b m r
+finally p w = do
+  r <- onException p (liftM return w)
+  lift_ Masked w
+  return r
 
--- | A self-contained pipeline that is ready to be run
-type Pipeline m r = Pipe () Void m r
+bracket :: Monad m
+        => m r
+        -> (r -> m y)
+        -> (r -> Pipe a b m x)
+        -> Pipe a b m x
+bracket open close run = do
+  r <- lift_ Masked open
+  x <- onException (run r) (liftM return (close r))
+  lift_ Masked $ close r
+  return x
 
-{-|
-    Wait for input from upstream within the 'Pipe' monad:
+catchP :: Monad m
+       => Pipe a b m r
+       -> (SomeException -> m (Pipe a b m r))
+       -> Pipe a b m r
+catchP p h = go p
+  where
+    go (Pure r) = return r
+    go (Free c) = Free $ Catch (fmap go c) h
 
-    'await' blocks until input is ready.
--}
 await :: Monad m => Pipe a b m a
-await = Await $ maybe discard Pure
+await = liftF $ Await id
 
-tryAwait :: Pipe a b m (Maybe a)
-tryAwait = Await Pure
+tryAwait :: Monad m => Pipe a b m (Maybe a)
+tryAwait = catch_ (liftM Just await) $ \(_ :: BrokenUpstreamPipe) -> return Nothing
 
-{-|
-    Pass output downstream within the 'Pipe' monad:
+yield :: Monad m => b -> Pipe a b m ()
+yield x = liftF $ Yield x ()
 
-    'yield' blocks until the output has been received.
--}
-yield :: b -> Pipe a b m ()
-yield x = Yield x (Pure ())
+lift_ :: Monad m => MaskState -> m r -> Pipe a b m r
+lift_ s m = Free $ M (liftM Pure m) s
 
-{-|
-    Convert a pure function into a pipe
+lift :: Monad m => m r -> Pipe a b m r
+lift = lift_ Unmasked
 
-> pipe = forever $ do
->     x <- await
->     yield (f x)
--}
-pipe :: (Monad m) => (a -> b) -> Pipe a b m r
+pipe :: Monad m => (a -> b) -> Pipe a b m r
 pipe f = forever $ await >>= yield . f
 
--- | The 'discard' pipe silently discards all input fed to it.
-discard :: (Monad m) => Pipe a b m r
-discard = forever await
-
-newtype PipeC m r a b = PipeC { unPipeC :: Pipe a b m r}
-
-idP :: (Monad m) => Pipe a a m r
+idP :: Monad m => Pipe a a m r
 idP = pipe id
 
-(<+<) :: (Monad m) => Pipe b c m r -> Pipe a b m r -> Pipe a c m r
-p1 <+< p2 = unPipeC (PipeC p1 <<< PipeC p2)
+discard :: Monad m => Pipe a b m r
+discard = forever await
 
-(>+>) :: (Monad m) => Pipe a b m r -> Pipe b c m r -> Pipe a c m r
-p1 >+> p2 = unPipeC (PipeC p1 >>> PipeC p2)
+data CompositionKind
+  = AdvanceFirst
+  | AdvanceSecond
+  | AdvanceBoth
 
--- These associativities help composition detect termination quickly
-infixr 9 <+<
+data Composition a b c m x y = Composition
+  CompositionKind
+  (Pipe a c m (Pipe a b m x, Pipe b c m y))
+
+cresult :: Composition a b c m x y
+        -> Pipe a c m (Pipe a b m x, Pipe b c m y)
+cresult (Composition _ r) = r
+
+advanceFirst :: Monad m => Pipe a c m x -> PipeF b c m y -> Composition a b c m x y
+advanceFirst p1 p2 = Composition AdvanceFirst $
+  liftM (\x -> (return x, liftF p2)) p1
+
+advanceSecond :: Monad m => PipeF a b m x -> Pipe a c m y -> Composition a b c m x y
+advanceSecond p1 p2 = Composition AdvanceSecond $
+  liftM (\y -> (liftF p1, return y)) p2
+
+advanceBoth :: Monad m => Pipe a c m x -> Pipe a c m y -> Composition a b c m x y
+advanceBoth p1 p2 = Composition AdvanceBoth $
+  liftM2 (\x y -> (return x, return y)) p1 p2
+
+compose :: Monad m
+   => PipeF a b m x
+   -> PipeF b c m y
+   -> Composition a b c m x y
+
+-- catch
+compose p1 p2@(Catch s h) =
+  let Composition k result = compose p1 s
+      result' = result >>= \(p1', _) -> return (p1', liftF p2)
+  in Composition k $ case k of
+    AdvanceFirst -> catchP result' $ \e ->
+      h e >>= \y -> return (return (throw e, return y))
+    AdvanceSecond -> catchP result $ \e ->
+      h e >>= \y -> return (return (liftF p1, return y))
+    AdvanceBoth -> result
+compose p1@(Catch s h) p2 =
+  let Composition k result = compose s p2
+      result' = result >>= \(_, p2') -> return (liftF p1, p2')
+  in Composition k $ case k of
+    AdvanceFirst -> catchP result $ \e ->
+      h e >>= \x -> return (return (return x, liftF p2))
+    AdvanceSecond -> catchP result' $ \e ->
+      h e >>= \x -> return (return (return x, throw e))
+    AdvanceBoth -> result
+
+-- first pipe running
+compose (Yield b x) (Await k) = advanceBoth (return x) (return (k b))
+compose (M m s) p2@(Await _) = advanceFirst (lift_ s m) p2
+compose (Throw e) p2@(Await _) = advanceFirst (throw e) p2
+compose (Await k) p2@(Await _) = advanceFirst (liftM k await) p2
+
+-- second pipe running
+compose p1 (Yield c y) = advanceSecond p1 (yield c >> return y)
+compose p1 (M m s) = advanceSecond p1 (lift_ s m)
+compose p1 (Throw e) = advanceSecond p1 (throw e)
+
+finalizeR :: Monad m
+  => x
+  -> PipeF b c m x
+  -> Pipe a c m x
+
+-- first pipe terminated
+finalizeR r c = let result = go c in case result of
+  Free (Throw e) -> case E.fromException e :: Maybe BrokenUpstreamPipe of
+    Nothing -> throw e
+    Just _  -> return r
+  _ -> result
+  where go (Await _) = throw BrokenUpstreamPipe
+        go (Yield z x) = yield z >> return x
+        go (M m s) = lift_ s m
+        go (Catch p2 h) = catchP (go p2) (liftM return . h)
+        go (Throw e) = throw e
+
+finalizeL :: Monad m
+  => PipeF a b m x
+  -> x
+  -> Pipe a c m x
+
+-- second pipe terminated
+finalizeL c r = let result = go c in case result of
+  Free (Throw e) -> case E.fromException e :: Maybe BrokenDownstreamPipe of
+    Nothing -> throw e
+    Just _  -> return r
+  _ -> result
+  where
+    go (Catch p1 h) = catchP (go p1) (liftM return . h)
+    go _ = throw BrokenDownstreamPipe
+
 infixl 9 >+>
+(>+>) :: Monad m => Pipe a b m r -> Pipe b c m r -> Pipe a c m r
+Free c1 >+> Free c2 = cresult (compose c1 c2) >>= \(p1', p2') -> join p1' >+> join p2'
+p1@(Pure r) >+> (Free c) = finalizeR (Pure r) c >>= \p2 -> p1 >+> p2
+Free c >+> p2@(Pure r) = finalizeL c (Pure r) >>= \p1 -> p1 >+> p2
+_ >+> Pure r = return r
 
-instance (Monad m) => Category (PipeC m r) where
-    id = PipeC $ pipe id
-    PipeC p1' . PipeC p2' = PipeC $ go False False p2' p1'
+infixr 9 <+<
+(<+<) :: Monad m => Pipe b c m r -> Pipe a b m r -> Pipe a c m r
+p2 <+< p1 = p1 >+> p2
+
+stepPipe :: Monad m
+         => (m r -> MaskState -> m (Either SomeException r))
+         -> PipeF () Void m r
+         -> m (Either SomeException r)
+stepPipe try (M m s) = try m s
+stepPipe try (Await k) = return . Right . k $ ()
+stepPipe try (Yield x _) = absurd x
+stepPipe try (Catch c h) = stepPipe try c >>= \x -> case x of
+  Left e -> liftM Right $ h e
+  Right p' -> return (Right p')
+stepPipe try (Throw e) = return $ Left e
+
+runPipe :: MonadBaseControl IO m => Pipe () Void m r -> m r
+runPipe p = E.mask $ \restore -> run p restore
+  where
+    run p restore = go p
       where
-        go _ _ p1 (Pure r) = return r
-        go t1 t2 p1 (Yield x c) = yield x >> go t1 t2 p1 c
-        go t1 t2 p1 (M m) = lift m >>= \p2 -> go t1 t2 p1 p2
-        go t1 t2 (Yield x c) (Await k) = go t1 t2 c $ k (Just x)
-        go t1 t2 (M m) p2@(Await _) = lift m >>= \p1 -> go t1 t2 p1 p2
-        go t1 False p1@(Pure _) (Await k) = go t1 True p1 (k Nothing)
-        go _ True (Pure r) (Await _) = return r
-        go False t2 (Await k) p2@(Await _) = tryAwait >>= \x -> go (isNothing x) t2 (k x) p2
-        go True False p1@(Await _) (Await k) = go True True p1 (k Nothing)
-        go True True p1@(Await _) p2@(Await _) = tryAwait >>= \_ -> {- unreachable -} go True True p1 p2
+        try m s = case s of
+          Masked -> E.try m
+          Unmasked -> E.try (restore m)
+        go (Pure r) = return r
+        go (Free c) = stepPipe try c >>= either E.throwIO go
 
-{-|
-    Run the 'Pipe' monad transformer, converting it back into the base monad
+runPurePipe :: Monad m => Pipe () Void m r -> m (Either SomeException r)
+runPurePipe (Pure r) = return $ Right r
+runPurePipe (Free c) = stepPipe try c >>= either (return . Left) runPurePipe
+  where try m _ = liftM Right m
 
-    'runPipe' will not work on a pipe that has loose input or output ends.  If
-    your pipe is still generating unhandled output, handle it.  I choose not to
-    automatically 'discard' output for you, because that is only one of many
-    ways to deal with unhandled output.
--}
-runPipe :: (Monad m) => Pipeline m r -> m r
-runPipe p' = case p' of
-    Pure r    -> return r
-    M mp      -> mp >>= runPipe
-    Await f   -> runPipe $ f (Just ())
-    Yield x _ -> absurd x
+runPurePipe_ :: Monad m => Pipe () Void m r -> m r
+runPurePipe_ p = runPurePipe p >>= either E.throw return
