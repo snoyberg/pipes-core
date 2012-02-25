@@ -41,18 +41,12 @@ import Prelude hiding (id, (.), catch)
 data BrokenDownstreamPipe = BrokenDownstreamPipe
   deriving (Show, Typeable)
 
-brokenDownstreamPipe :: SomeException
-brokenDownstreamPipe = E.toException BrokenDownstreamPipe
-
 instance Exception BrokenDownstreamPipe
 
 data BrokenUpstreamPipe = BrokenUpstreamPipe
   deriving (Show, Typeable)
 
 instance Exception BrokenUpstreamPipe
-
-brokenUpstreamPipe :: SomeException
-brokenUpstreamPipe = E.toException BrokenUpstreamPipe
 
 data MaskState = Masked | Unmasked
 
@@ -228,7 +222,7 @@ finalizeR r c = let result = go c in case result of
     Nothing -> throw e
     Just _  -> return r
   _ -> result
-  where go (Await _) = throw brokenUpstreamPipe
+  where go (Await _) = throw BrokenUpstreamPipe
         go (Yield z x) = yield z >> return x
         go (M m s) = lift_ s m
         go (Catch p2 h) = catchP (go p2) (liftM return . h)
@@ -247,7 +241,7 @@ finalizeL c r = let result = go c in case result of
   _ -> result
   where
     go (Catch p1 h) = catchP (go p1) (liftM return . h)
-    go _ = throw brokenDownstreamPipe
+    go _ = throw BrokenDownstreamPipe
 
 infixl 9 >+>
 (>+>) :: Monad m => Pipe a b m r -> Pipe b c m r -> Pipe a c m r
