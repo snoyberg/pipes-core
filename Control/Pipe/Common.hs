@@ -23,6 +23,8 @@ module Control.Pipe.Common (
   discard,
   (>+>), (<+<),
   runPipe,
+  runPurePipe,
+  runPurePipe_,
   Void,
   ) where
 
@@ -258,21 +260,33 @@ infixr 9 <+<
 (<+<) :: Monad m => Pipe b c m r -> Pipe a b m r -> Pipe a c m r
 p2 <+< p1 = p1 >+> p2
 
-runPipe :: MonadBaseControl IO m
-        => Pipe () Void m r
-        -> m r
-runPipe p = E.mask $ \restore -> go p restore
-  where
-    go (Pure r) _ = return r
-    go (Free c) restore = step c restore >>= \x -> case x of
-      Left e -> E.throwIO e
-      Right p' -> go p' restore
+stepPipe :: Monad m
+         => (m r -> MaskState -> m (Either SomeException r))
+         -> PipeF () Void m r
+         -> m (Either SomeException r)
+stepPipe try (M m s) = try m s
+stepPipe try (Await k) = return . Right . k $ ()
+stepPipe try (Yield x _) = absurd x
+stepPipe try (Catch c h) = stepPipe try c >>= \x -> case x of
+  Left e -> liftM Right $ h e
+  Right p' -> return (Right p')
+stepPipe try (Throw e) = return $ Left e
 
-    step (M m Unmasked) restore = E.try (restore m)
-    step (M m Masked) _ = E.try m
-    step (Await k) _ = return . Right . k $ ()
-    step (Yield x _) _ = absurd x
-    step (Catch c h) restore = step c restore >>= \x -> case x of
-      Left e -> liftM Right $ h e
-      Right p' -> return (Right p')
-    step (Throw e) _ = return $ Left e
+runPipe :: MonadBaseControl IO m => Pipe () Void m r -> m r
+runPipe p = E.mask $ \restore -> run p restore
+  where
+    run p restore = go p
+      where
+        try m s = case s of
+          Masked -> E.try m
+          Unmasked -> E.try (restore m)
+        go (Pure r) = return r
+        go (Free c) = stepPipe try c >>= either E.throwIO go
+
+runPurePipe :: Monad m => Pipe () Void m r -> m (Either SomeException r)
+runPurePipe (Pure r) = return $ Right r
+runPurePipe (Free c) = stepPipe try c >>= either (return . Left) runPurePipe
+  where try m _ = liftM Right m
+
+runPurePipe_ :: Monad m => Pipe () Void m r -> m r
+runPurePipe_ p = runPurePipe p >>= either E.throw return
