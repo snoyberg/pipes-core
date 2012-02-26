@@ -51,7 +51,7 @@ data BrokenUpstreamPipe = BrokenUpstreamPipe
 
 instance Exception BrokenUpstreamPipe
 
-data MaskState = Masked | Unmasked
+data MaskState = Masked | Unmasked | Strict
 
 data PipeF a b m x
   = M (m x) MaskState
@@ -109,7 +109,7 @@ finally :: Monad m
         -> Pipe a b m r
 finally p w = do
   r <- onException p (liftM return w)
-  lift_ Masked w
+  lift_ Strict w
   return r
 
 bracket :: Monad m
@@ -120,7 +120,7 @@ bracket :: Monad m
 bracket open close run = do
   r <- lift_ Masked open
   x <- onException (run r) (liftM return (close r))
-  lift_ Masked $ close r
+  lift_ Strict $ close r
   return x
 
 catchP :: Monad m
@@ -209,6 +209,7 @@ compose p1@(Catch s h) p2 =
 -- first pipe running
 compose (Yield b x) (Await k) = advanceBoth (return x) (return (k b))
 compose (M m s) p2@(Await _) = advanceFirst (lift_ s m) p2
+compose (M m Strict) p2 = advanceFirst (lift_ Strict m) p2
 compose (Throw e) p2@(Await _) = advanceFirst (throw e) p2
 compose (Await k) p2@(Await _) = advanceFirst (liftM k await) p2
 
@@ -247,6 +248,7 @@ finalizeL c r = let result = go c in case result of
   _ -> result
   where
     go (Catch p1 h) = catchP (go p1) (liftM return . h)
+    go (M m Strict) = lift_ Masked m
     go _ = throw BrokenDownstreamPipe
 
 infixl 9 >+>
@@ -278,8 +280,8 @@ runPipe p = E.mask $ \restore -> run p restore
     run p restore = go p
       where
         try m s = case s of
-          Masked -> E.try m
           Unmasked -> E.try (restore m)
+          _        -> E.try m
         go (Pure r) = return r
         go (Free c) = stepPipe try c >>= either E.throwIO go
 
