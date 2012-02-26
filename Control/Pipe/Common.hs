@@ -4,6 +4,9 @@ module Control.Pipe.Common (
   BrokenUpstreamPipe,
   PipeF(..),
   Pipe,
+  Producer,
+  Consumer,
+  Pipeline,
   throw,
   catchP,
   catch,
@@ -65,6 +68,9 @@ instance Monad m => Functor (PipeF a b m) where
   fmap _ (Throw e) = Throw e
 
 type Pipe a b m = Free (PipeF a b m)
+type Producer b m = Pipe () b m
+type Consumer a m = Pipe a Void m
+type Pipeline m = Pipe () Void m
 
 catch :: (Monad m, Exception e)
       => Pipe a b m r
@@ -266,7 +272,7 @@ stepPipe try (Catch c h) = stepPipe try c >>= \x -> case x of
   Right p' -> return (Right p')
 stepPipe try (Throw e) = return $ Left e
 
-runPipe :: MonadBaseControl IO m => Pipe () Void m r -> m r
+runPipe :: MonadBaseControl IO m => Pipeline m r -> m r
 runPipe p = E.mask $ \restore -> run p restore
   where
     run p restore = go p
@@ -277,10 +283,10 @@ runPipe p = E.mask $ \restore -> run p restore
         go (Pure r) = return r
         go (Free c) = stepPipe try c >>= either E.throwIO go
 
-runPurePipe :: Monad m => Pipe () Void m r -> m (Either SomeException r)
+runPurePipe :: Monad m => Pipeline m r -> m (Either SomeException r)
 runPurePipe (Pure r) = return $ Right r
 runPurePipe (Free c) = stepPipe try c >>= either (return . Left) runPurePipe
   where try m _ = liftM Right m
 
-runPurePipe_ :: Monad m => Pipe () Void m r -> m r
+runPurePipe_ :: Monad m => Pipeline m r -> m r
 runPurePipe_ p = runPurePipe p >>= either E.throw return
