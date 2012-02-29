@@ -189,6 +189,19 @@ compose _ (M m s) = AdvanceSecond (lift_ s m)
 compose (M m s) _ = AdvanceFirst (lift_ s m)
 compose (Await k) _ = AdvanceFirst (liftM k await)
 
+finalize2 :: Monad m
+          => PipeF b c m r
+          -> Maybe (Pipe a c m r)
+finalize2 (Await _) = Nothing
+finalize2 (M m s) = Just $ lift_ s m
+finalize2 (Yield c r) = Just $ yield c >> return r
+
+finalize1 :: Monad m
+          => PipeF a b m r
+          -> Maybe (Pipe a c m r)
+finalize1 (M m Ensure) = Just $ ensure m
+finalize1 _ = Nothing
+
 infixl 9 >+>
 (>+>) :: Monad m => Pipe a b m r -> Pipe b c m r -> Pipe a c m r
 p1 >+> p2 = case (p1, p2) of
@@ -196,10 +209,21 @@ p1 >+> p2 = case (p1, p2) of
     AdvanceFirst comp -> catchP comp (return . h1) >>= \p1' -> p1' >+> p2
     AdvanceSecond comp -> catchP comp (return . h2) >>= \p2' -> p1 >+> p2'
     AdvanceBoth p1' p2' -> p1' >+> p2'
-  (Free _ h, Throw e) -> h e >+> p2
-  (Throw e, Free _ h) -> p1 >+> h e
-  (Free _ h, Pure _) -> h (E.toException BrokenDownstreamPipe) >+> p2
-  (Pure _, Free _ h) -> p1 >+> h (E.toException BrokenUpstreamPipe)
+  (Throw e, Free c h) -> case finalize2 c of
+    Nothing   -> p1 >+> h e
+    Just comp -> comp >>= \p2' -> p1 >+> p2'
+  (Pure r, Free c h) -> case finalize2 c of
+    Nothing   -> p1 >+> h (E.toException BrokenUpstreamPipe)
+    Just comp -> comp >>= \p2' -> p1 >+> p2'
+  (Free c h, Throw e) -> case finalize1 c of
+    Nothing   -> h e >+> p2
+    Just comp -> comp >>= \p1' -> p1' >+> p2
+  (Free c h, Pure r) -> case finalize1 c of
+    Nothing   -> h (E.toException BrokenDownstreamPipe) >+> p2
+    Just comp -> comp >>= \p1' -> p1' >+> p2
+  (Pure r, Throw e) -> case (E.fromException e :: Maybe BrokenUpstreamPipe) of
+    Nothing -> throw e
+    Just _  -> return r
   (_, Throw e) -> throw e
   (_, Pure r) -> return r
 
