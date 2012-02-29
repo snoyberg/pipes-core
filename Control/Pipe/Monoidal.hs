@@ -16,7 +16,6 @@ import Control.Category.Associative
 import Control.Category.Braided
 import Control.Category.Monoidal
 import Control.Monad
-import Control.Monad.Free
 import qualified Control.Monad.Trans as T
 import Control.Monad.State
 import Control.Pipe.Common
@@ -25,12 +24,11 @@ firstP :: Monad m
        => Pipe a b m r
        -> Pipe (Either a c) (Either b c) m r
 firstP (Pure r) = return r
-firstP (Free c) = step c >>= firstP
+firstP (Throw e) = Throw e
+firstP (Free c h) = catchP (step c) (return . h) >>= firstP
   where
     step (M m s) = lift_ s m
     step (Yield b x) = yield (Left b) >> return x
-    step (Throw e) = throw e
-    step (Catch s h) = catchP (step s) (liftM return . h)
     step (Await k) = go
       where
         go = await >>= either (return . k)
@@ -40,17 +38,15 @@ secondP :: Monad m
         => Pipe a b m r
         -> Pipe (Either c a) (Either c b) m r
 secondP (Pure r) = return r
-secondP (Free c) = step c >>= secondP
+secondP (Throw e) = Throw e
+secondP (Free c h) = catchP (step c) (return . h) >>= secondP
   where
     step (M m s) = lift_ s m
     step (Yield b x) = yield (Right b) >> return x
-    step (Throw e) = throw e
-    step (Catch s h) = catchP (step s) (liftM return . h)
     step (Await k) = go
       where
         go = await >>= either (yield . Left >=> const go)
                               (return . k)
-
 (***) :: Monad m
       => Pipe a b m r
       -> Pipe a' b' m r
@@ -90,31 +86,21 @@ emptyQueue = Queue [] []
 enqueue :: a -> Queue a -> Queue a
 enqueue x (Queue xs ys) = Queue (x : xs) ys
 
-dequeue :: Queue a -> (Maybe a, Queue a)
-dequeue (Queue (x : xs) ys) = (Just x, Queue xs ys)
-dequeue q@(Queue [] []) = (Nothing, q)
+dequeue :: Queue a -> (Queue a, Maybe a)
+dequeue (Queue (x : xs) ys) = (Queue xs ys, Just x)
+dequeue q@(Queue [] []) = (q, Nothing)
 dequeue (Queue [] ys) = dequeue (Queue (reverse ys) [])
 
 loopP :: Monad m => Pipe (Either a c) (Either b c) m r -> Pipe a b m r
-loopP p = evalStateT (go p) emptyQueue
+loopP = go emptyQueue
   where
-    go (Pure r) = return r
-    go (Free c) = step c >>= T.lift >>= go
+    go _ (Pure r) = return r
+    go _ (Throw e) = throw e
+    go q (Free c h) = case step q c of
+      (q', p') -> catchP p' (return . h) >>= go q'
 
-    step (M m s) = return $ lift_ s m
-    step (Await k) = do
-      x <- deq
-      return $ case x of
-        Nothing -> liftM (k . Left) await
-        Just x  -> return $ k (Right x)
-    step (Yield (Left b) x) = return $ yield b >> return x
-    step (Yield (Right z) x) = enq z >> return (return x)
-    step (Catch s h) = do
-      p <- step s
-      return $ catchP p (liftM return . h)
-    step (Throw e) = return $ throw e
-
-    enq = modify . enqueue
-    deq = do
-      (x, q) <- gets dequeue
-      put q >> return x
+    step q (Await k) = case dequeue q of
+      (q', x) -> (q', maybe (liftM (k . Left) await) (return . k . Right) x)
+    step q (Yield (Right x) c) = (enqueue x q, return c)
+    step q (Yield (Left x) c) = (q, yield x >> return c)
+    step q (M m s) = (q, lift_ s m)
