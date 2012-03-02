@@ -2,6 +2,8 @@ module Control.Pipe.Exception (
   throw,
   catch,
   bracket,
+  bracket_,
+  bracketOnError,
   finally,
   onException,
   ) where
@@ -23,7 +25,7 @@ import Prelude hiding (catch)
 -- we can use 'catch' to resume after an exception. For example:
 --
 -- > safeReader :: Pipe () (Either SomeException String) IO ()
--- > safeReader = catch (reader >+> pipe Right) $ \e -> do
+-- > safeReader = catch (reader >+> 'Pipe' Right) $ \e -> do
 -- >   yield $ Left e
 --
 -- Note that there is no guarantee that the handler will actually be executed,
@@ -34,8 +36,8 @@ import Prelude hiding (catch)
 -- perform cleanup or finalization of resources.  However, we recommend using
 -- 'finally' or 'bracket' for such use cases.
 catch :: (Monad m, E.Exception e)
-      => Pipe a b m r               -- ^ The 'Pipe' to run
-      -> (e -> Pipe a b m r)        -- ^ The handler function
+      => Pipe a b m r               -- ^ 'Pipe' to run
+      -> (e -> Pipe a b m r)        -- ^ handler function
       -> Pipe a b m r
 catch p h = catchP p $ \e -> case E.fromException e of
   Nothing -> throwP e
@@ -55,23 +57,23 @@ throw = throwP . E.toException
 -- | Like 'finally', but only performs the final action if there was an
 -- exception raised by the 'Pipe'.
 onException :: Monad m
-            => Pipe a b m r
-            -> Pipe a b m s
+            => Pipe a b m r       -- ^ 'Pipe' to run first
+            -> Pipe a b m s       -- ^ 'Pipe' to run if an exception happens
             -> Pipe a b m r
 onException p w = catchP p $ \e -> w >> throw e
 
 -- | A specialized variant of 'bracket' with just a computation to run
 -- afterwards.
 finally :: Monad m
-        => Pipe a b m r
-        -> m s
+        => Pipe a b m r           -- ^ 'Pipe' to run first
+        -> m s                    -- ^ finalizer action
         -> Pipe a b m r
 finally p w = do
   r <- onException p (ensure w)
   ensure w
   return r
 
--- | Allocate a resource within the base monad, run a pipe, then ensure the
+-- | Allocate a resource within the base monad, run a 'Pipe', then ensure the
 -- resource is released.
 --
 -- The typical example is reading from a file:
@@ -84,10 +86,31 @@ finally p w = do
 -- >       yield line
 -- >       ...)
 bracket :: Monad m
-        => m r
-        -> (r -> m y)
-        -> (r -> Pipe a b m x)
+        => m r                  -- ^ action to acquire resource
+        -> (r -> m y)           -- ^ action to release resource
+        -> (r -> Pipe a b m x)  -- ^ 'Pipe' to run in between
         -> Pipe a b m x
 bracket open close run = do
   r <- liftP Masked open
   finally (run r) (close r)
+
+-- | A variant of 'bracket' where the return value from the allocation action
+-- is not required.
+bracket_ :: Monad m
+         => m r                 -- ^ action to run first
+         -> m y                 -- ^ action to run last
+         -> Pipe a b m x        -- ^ 'Pipe' to run in between
+         -> Pipe a b m x
+bracket_ open close run =
+  bracket open (const close) (const run)
+
+-- | Like 'bracket', but only performs the \"release\" action if there was an
+-- exception raised by the 'Pipe'.
+bracketOnError :: Monad m
+               => m r                     -- ^ action to acquire resource
+               -> (r -> m y)              -- ^ action to release resource
+               -> (r -> Pipe a b m x)     -- ^ 'Pipe' to run in between
+               -> Pipe a b m x
+bracketOnError open close run = do
+  r <- liftP Masked open
+  onException (run r) (ensure $ close r)
