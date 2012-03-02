@@ -7,23 +7,16 @@ module Control.Pipe.Common (
   Producer,
   Consumer,
   Pipeline,
-  throw,
-  catchP,
-  catch,
-  catchM,
-  onException,
-  finally,
-  bracket,
   await,
   yield,
-  lift,
   masked,
   ensure,
   MaskState(..),
-  lift_,
-  tryAwait,
   pipe,
   idP,
+  throwP,
+  catchP,
+  liftP,
   discard,
   (>+>), (<+<),
   runPipe,
@@ -90,48 +83,7 @@ instance Monad m => Applicative (Pipe a b m) where
   (<*>) = ap
 
 liftF :: Monad m => PipeF a b m r -> Pipe a b m r
-liftF c = Free (fmap return c) throw
-
-catch :: (Monad m, Exception e)
-      => Pipe a b m r
-      -> (e -> Pipe a b m r)
-      -> Pipe a b m r
-catch p h = catchP p $ \e -> case E.fromException e of
-  Nothing -> throw e
-  Just e' -> h e'
-
-catchM :: (Monad m, Exception e)
-       => Pipe a b m r
-       -> (e -> m r)
-       -> Pipe a b m r
-catchM p h = catch p $ \e -> ensure (h e)
-
-throw :: (Monad m, Exception e) => e -> Pipe a b m r
-throw e = Throw . E.toException $ e
-
-onException :: Monad m
-            => Pipe a b m r
-            -> Pipe a b m s
-            -> Pipe a b m r
-onException p w = catchP p $ \e -> w >> throw e
-
-finally :: Monad m
-        => Pipe a b m r
-        -> m s
-        -> Pipe a b m r
-finally p w = do
-  r <- onException p (ensure w)
-  ensure w
-  return r
-
-bracket :: Monad m
-        => m r
-        -> (r -> m y)
-        -> (r -> Pipe a b m x)
-        -> Pipe a b m x
-bracket open close run = do
-  r <- lift_ Masked open
-  finally (run r) (close r)
+liftF c = Free (fmap return c) throwP
 
 catchP :: Monad m
        => Pipe a b m r
@@ -141,26 +93,26 @@ catchP (Pure r) _ = return r
 catchP (Free c h1) h2 = Free c $ \e -> catchP (h1 e) h2
 catchP (Throw e) h = h e
 
+throwP :: Monad m => SomeException -> Pipe a b m r
+throwP = Throw
+
 await :: Monad m => Pipe a b m a
 await = liftF $ Await id
-
-tryAwait :: Monad m => Pipe a b m (Maybe a)
-tryAwait = catch (liftM Just await) $ \(_ :: BrokenUpstreamPipe) -> return Nothing
 
 yield :: Monad m => b -> Pipe a b m ()
 yield x = liftF $ Yield x ()
 
-lift_ :: Monad m => MaskState -> m r -> Pipe a b m r
-lift_ s m = liftF (M m s)
+liftP :: Monad m => MaskState -> m r -> Pipe a b m r
+liftP s m = liftF (M m s)
 
 instance MonadTrans (Pipe a b) where
-  lift = lift_ Unmasked
+  lift = liftP Unmasked
 
 masked :: Monad m => m r -> Pipe a b m r
-masked = lift_ Masked
+masked = liftP Masked
 
 ensure :: Monad m => m r -> Pipe a b m r
-ensure = lift_ Ensure
+ensure = liftP Ensure
 
 pipe :: Monad m => (a -> b) -> Pipe a b m r
 pipe f = forever $ await >>= yield . f
@@ -181,17 +133,17 @@ compose :: Monad m
    -> PipeF b c m y
    -> Composition a b c m x y
 compose (Yield b x) (Await k) = AdvanceBoth x (k b)
-compose (M m Ensure) _ = AdvanceFirst (lift_ Ensure m)
+compose (M m Ensure) _ = AdvanceFirst (liftP Ensure m)
 compose _ (Yield c y) = AdvanceSecond (yield c >> return y)
-compose _ (M m s) = AdvanceSecond (lift_ s m)
-compose (M m s) _ = AdvanceFirst (lift_ s m)
+compose _ (M m s) = AdvanceSecond (liftP s m)
+compose (M m s) _ = AdvanceFirst (liftP s m)
 compose (Await k) _ = AdvanceFirst (liftM k await)
 
 finalize2 :: Monad m
           => PipeF b c m r
           -> Maybe (Pipe a c m r)
 finalize2 (Await _) = Nothing
-finalize2 (M m s) = Just $ lift_ s m
+finalize2 (M m s) = Just $ liftP s m
 finalize2 (Yield c r) = Just $ yield c >> return r
 
 finalize1 :: Monad m
@@ -220,9 +172,9 @@ p1 >+> p2 = case (p1, p2) of
     Nothing   -> h (E.toException BrokenDownstreamPipe) >+> p2
     Just comp -> comp >>= \p1' -> p1' >+> p2
   (Pure r, Throw e) -> case (E.fromException e :: Maybe BrokenUpstreamPipe) of
-    Nothing -> throw e
+    Nothing -> throwP e
     Just _  -> return r
-  (_, Throw e) -> throw e
+  (_, Throw e) -> throwP e
   (_, Pure r) -> return r
 
 infixr 9 <+<

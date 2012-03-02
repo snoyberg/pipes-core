@@ -27,7 +27,7 @@ firstP (Pure r) = return r
 firstP (Throw e) = Throw e
 firstP (Free c h) = catchP (step c) (return . h) >>= firstP
   where
-    step (M m s) = lift_ s m
+    step (M m s) = liftP s m
     step (Yield b x) = yield (Left b) >> return x
     step (Await k) = go
       where
@@ -41,7 +41,7 @@ secondP (Pure r) = return r
 secondP (Throw e) = Throw e
 secondP (Free c h) = catchP (step c) (return . h) >>= secondP
   where
-    step (M m s) = lift_ s m
+    step (M m s) = liftP s m
     step (Yield b x) = yield (Right b) >> return x
     step (Await k) = go
       where
@@ -95,7 +95,7 @@ loopP :: Monad m => Pipe (Either a c) (Either b c) m r -> Pipe a b m r
 loopP = go emptyQueue
   where
     go _ (Pure r) = return r
-    go _ (Throw e) = throw e
+    go _ (Throw e) = throwP e
     go q (Free c h) = case step q c of
       (q', p') -> catchP p' (return . h) >>= go q'
 
@@ -103,4 +103,4 @@ loopP = go emptyQueue
       (q', x) -> (q', maybe (liftM (k . Left) await) (return . k . Right) x)
     step q (Yield (Right x) c) = (enqueue x q, return c)
     step q (Yield (Left x) c) = (q, yield x >> return c)
-    step q (M m s) = (q, lift_ s m)
+    step q (M m s) = (q, liftP s m)
