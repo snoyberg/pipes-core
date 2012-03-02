@@ -243,8 +243,8 @@ runPipe p = E.mask $ \restore -> run restore p
         go (Throw e) = E.throwIO e
 
         try m s = E.try $ case s of
-          Unmasked -> m
-          _ -> restore m
+          Unmasked -> restore m
+          _ -> m
 
 runPurePipe :: Monad m => Pipeline m r -> m (Either SomeException r)
 runPurePipe (Pure r) = return $ Right r
