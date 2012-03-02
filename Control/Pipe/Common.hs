@@ -131,9 +131,7 @@ bracket :: Monad m
         -> Pipe a b m x
 bracket open close run = do
   r <- lift_ Masked open
-  x <- onException (run r) (ensure (close r))
-  ensure $ close r
-  return x
+  finally (run r) (close r)
 
 catchP :: Monad m
        => Pipe a b m r
