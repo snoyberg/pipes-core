@@ -111,8 +111,8 @@ dequeue (Queue (x : xs) ys) = (Queue xs ys, Just x)
 dequeue q@(Queue [] []) = (q, Nothing)
 dequeue (Queue [] ys) = dequeue (Queue (reverse ys) [])
 
--- The 'loopP' combinator allows to create 'Pipe's whose output value is fed
--- back to the pipe as input.
+-- | The 'loopP' combinator allows to create 'Pipe's whose output value is fed
+-- back to the 'Pipe' as input.
 loopP :: Monad m => Pipe (Either a c) (Either b c) m r -> Pipe a b m r
 loopP = go emptyQueue
   where
