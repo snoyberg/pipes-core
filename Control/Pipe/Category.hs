@@ -1,6 +1,8 @@
 {-# LANGUAGE MultiParamTypeClasses, TypeFamilies #-}
 
 module Control.Pipe.Category (
+  -- | This module contains category-theoretic instances corresponding to basic
+  -- pipe combinators in 'Control.Pipe.Common' and 'Control.Pipe.Monoidal'.
   PipeC(..),
   IFunctor(..),
   ) where
@@ -17,7 +19,9 @@ import Control.Pipe.Monoidal
 import Data.Void
 import Prelude hiding ((.), id)
 
--- category instance
+-- | Category of pipes.
+--
+-- Composition corresponds to '<+<' and identity to 'idP'.
 newtype PipeC m r a b = PipeC { unPipeC :: Pipe a b m r }
 
 instance Monad m => Category (PipeC m r) where
