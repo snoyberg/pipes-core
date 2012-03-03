@@ -64,17 +64,17 @@ import Data.Void
 import Prelude hiding (id, (.), catch)
 
 -- | The 'BrokenDownstreamPipe' exception is used to signal termination of the
--- downstream portion of a 'Pipeline' after the current 'Pipe'.
+-- downstream portion of a 'Pipeline' after the current pipe.
 --
--- There is usually no need to catch this exception explicitly, a 'Pipe' will
--- terminate automatically when the downstream 'Pipe' terminates.
+-- There is usually no need to catch this exception explicitly, a pipe will
+-- terminate automatically when the downstream pipe terminates.
 data BrokenDownstreamPipe = BrokenDownstreamPipe
   deriving (Show, Typeable)
 
 instance Exception BrokenDownstreamPipe
 
 -- | The 'BrokenUpstreamPipe' exception is used to signal termination of the
--- upstream portion of a 'Pipeline' before the current 'Pipe'.
+-- upstream portion of a 'Pipeline' before the current pipe
 --
 -- A 'BrokenUpstreamPipe' exception can be caught to perform cleanup actions
 -- immediately before termination, like returning a result or yielding
@@ -153,7 +153,7 @@ liftF c = Free (fmap return c) throwP
 throwP :: Monad m => SomeException -> Pipe a b m r
 throwP = Throw
 
--- | Catch an exception within the 'Pipe' monad.
+-- | Catch an exception within the pipe monad.
 catchP :: Monad m
        => Pipe a b m r
        -> (SomeException -> Pipe a b m r)
@@ -190,7 +190,7 @@ masked = liftP Masked
 
 -- | Execute an action in the base monad with upstream priority.
 --
--- Normally, downstream effects are given priority in 'Pipe' composition. Using
+-- Normally, downstream effects are given priority in pipe composition. Using
 -- 'ensure' allows to change this behavior, and create an action which is
 -- executed /before/ downstream actions and despite downstream termination.
 --
@@ -296,10 +296,10 @@ runPipe p = E.mask $ \restore -> run restore p
           Unmasked -> restore m
           _ -> m
 
--- | Run a self-contained 'Pipeline' over an arbitrary monad, with fewer
+-- | Run a self-contained pipeline over an arbitrary monad, with fewer
 -- exception-safety guarantees than 'runPipe'.
 --
--- Only 'Pipe' termination exceptions and exceptions thrown using
+-- Only pipe termination exceptions and exceptions thrown using
 -- 'Control.Pipe.Exception.throw' will be catchable within the 'Pipe' monad.
 -- Any other exception will terminate execution immediately and finalizers will
 -- not be called.

@@ -258,7 +258,7 @@
 -- >>> runPipe $ (fromList [1..10] *> pure Nothing) >+> (Just <$> deliver 3)
 -- Just [1,2,3]
 --
--- which can be written using the @($$)@ operator:
+-- which can be written using the 'Control.Pipe.Combinators.$$' operator:
 --
 -- >>> runPipe $ fromList [1..10] $$ deliver 3
 -- Just [1,2,3]
@@ -422,21 +422,23 @@
 -- Closing file...
 --
 -- We also provide exception-handling primitives like 'catch' and
--- 'onException'. See 'Control.Pipe.Common' for a complete list.
+-- 'onException'. See 'Control.Pipe.Exception' for more details on exception
+-- handling and a complete list of primitives.
 --
--- Resource finalization and exception-handling functionalities work in any
+-- Resource finalization and exception handling functionalities work in any
 -- base monad, so we provide a 'Pipe'-specific mechanism for throwing
 -- exceptions which does not suffer from the limitation of only being catchable
 -- in the @IO@ monad:
 --
 -- > throw :: (Monad m, Exception e) => e -> Pipe a b m r
 --
--- However, exceptions thrown with other means (like 'error' or @throw@ in
+-- However, exceptions thrown by other means (like 'error' or @throw@ in
 -- 'Control.Exception'), can only be caught when the 'Pipeline' is run with
 -- 'runPipe'.  If you use 'runPurePipe', such an exception will abruptly
 -- terminate the whole 'Pipeline', and resource finalization will not be
 -- guaranteed.
 module Control.Pipe (
+  -- * Implementation
   module Control.Pipe.Common,
   module Control.Pipe.Monoidal
   ) where
