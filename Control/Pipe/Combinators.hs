@@ -1,22 +1,41 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 -- | Basic pipe combinators.
 module Control.Pipe.Combinators (
+  -- ** Control operators
+  tryAwait,
+  forP,
+  -- ** Composition
   ($$),
+  -- ** Producers
   fromList,
-  nullP,
+  -- ** Folds
+  -- | Folds are pipes that consume all their input and return a value. Some of
+  -- them, like 'fold1', do not return anything when they don't receive any
+  -- input at all. That means that the upstream return value will be returned
+  -- instead.
+  --
+  -- Folds are normally used as 'Consumer's, but they are actually polymorphic
+  -- in the output type, to encourage their use in the implementation of
+  -- higher-level combinators.
   fold,
   fold1,
   consume,
   consume1,
+  -- ** List-like pipe combinators
+  -- The following combinators are analogous to the corresponding list
+  -- functions, when the stream of input values is thought of as a (potentially
+  -- infinite) list.
   take,
   drop,
-  pipeList,
   takeWhile,
   takeWhile_,
   dropWhile,
   intersperse,
   groupBy,
   filter,
+  -- ** Other combinators
+  pipeList,
+  nullP,
   feed,
   ) where
 
@@ -35,6 +54,12 @@ import Prelude hiding (until, take, drop, concatMap, filter, takeWhile, dropWhil
 -- immediately.
 tryAwait :: Monad m => Pipe a b m (Maybe a)
 tryAwait = catch (Just <$> await) $ \(_ :: BrokenUpstreamPipe) -> return Nothing
+
+-- | Execute the specified pipe for each value in the input stream.
+--
+-- Any action after a call to 'forP' will be executed when upstream terminates.
+forP :: Monad m => (a -> Pipe a b m r) -> Pipe a b m ()
+forP f = tryAwait >>= maybe (return ()) (\a -> f a >> forP f)
 
 -- | Connect producer to consumer, ignoring producer return value.
 infixr 5 $$
