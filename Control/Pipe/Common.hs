@@ -159,7 +159,9 @@ catchP :: Monad m
        -> (SomeException -> Pipe a b m r)
        -> Pipe a b m r
 catchP (Pure r) _ = return r
-catchP (Free c h1) h2 = Free c $ \e -> catchP (h1 e) h2
+catchP (Free c h1) h2 = Free
+  (fmap (`catchP` h2) c)
+  (\e -> catchP (h1 e) h2)
 catchP (Throw e) h = h e
 
 -- | Wait for input from upstream within the 'Pipe' monad.
