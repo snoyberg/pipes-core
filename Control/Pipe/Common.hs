@@ -256,16 +256,16 @@ p1 >+> p2 = case (p1, p2) of
     AdvanceBoth p1' p2' -> p1' >+> p2'
   (Throw e, Free c h) -> case finalize2 c of
     Nothing   -> p1 >+> h e
-    Just comp -> comp >>= \p2' -> p1 >+> p2'
+    Just comp -> catchP comp (return . h) >>= \p2' -> p1 >+> p2'
   (Pure r, Free c h) -> case finalize2 c of
     Nothing   -> p1 >+> h (E.toException BrokenUpstreamPipe)
-    Just comp -> comp >>= \p2' -> p1 >+> p2'
+    Just comp -> catchP comp (return . h) >>= \p2' -> p1 >+> p2'
   (Free c h, Throw e) -> case finalize1 c of
     Nothing   -> h e >+> p2
-    Just comp -> comp >>= \p1' -> p1' >+> p2
+    Just comp -> catchP comp (return . h) >>= \p1' -> p1' >+> p2
   (Free c h, Pure r) -> case finalize1 c of
     Nothing   -> h (E.toException BrokenDownstreamPipe) >+> p2
-    Just comp -> comp >>= \p1' -> p1' >+> p2
+    Just comp -> catchP comp (return . h) >>= \p1' -> p1' >+> p2
   (Pure r, Throw e) -> case (E.fromException e :: Maybe BrokenUpstreamPipe) of
     Nothing -> throwP e
     Just _  -> return r
