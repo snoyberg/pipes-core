@@ -90,6 +90,7 @@ data MaskState
   | Unmasked  -- ^ Action to be run with asynchronous exceptions unmasked.
   | Ensure    -- ^ Action to be run with priority with respect to downstream
               --   actions, and asynchronous exceptions masked.
+  | Finalizer
 
 data PipeF a b m x
   = M (m x) MaskState
@@ -201,6 +202,9 @@ masked = liftP Masked
 ensure :: Monad m => m r -> Pipe a b m r
 ensure = liftP Ensure
 
+finalizer :: Monad m => m r -> Pipe a b m r
+finalizer = liftP Finalizer
+
 -- | Convert a pure function into a pipe.
 --
 -- > pipe = forever $ do
@@ -225,12 +229,13 @@ data Composition a b c m x y
 compose :: Monad m
    => PipeF a b m x
    -> PipeF b c m y
-   -> Composition a b c m x y
-compose (Yield b x) (Await k) = AdvanceBoth x (k b)
-compose _ (Yield c y) = AdvanceSecond (yield c >> return y)
-compose _ (M m s) = AdvanceSecond (liftP s m)
-compose (M m s) _ = AdvanceFirst (liftP s m)
-compose (Await k) _ = AdvanceFirst (liftM k await)
+   -> Maybe (Composition a b c m x y)
+compose (Yield b x) (Await k) = Just $ AdvanceBoth x (k b)
+compose _ (Yield c y) = Just $ AdvanceSecond (yield c >> return y)
+compose _ (M m s) = Just $ AdvanceSecond (liftP s m)
+compose (M _ Finalizer) _ = Nothing
+compose (M m s) _ = Just $ AdvanceFirst (liftP s m)
+compose (Await k) _ = Just $ AdvanceFirst (liftM k await)
 
 finalize2 :: Monad m
           => PipeF b c m r
@@ -242,7 +247,8 @@ finalize2 (Yield c r) = Just $ yield c >> return r
 finalize1 :: Monad m
           => PipeF a b m r
           -> Maybe (Pipe a c m r)
-finalize1 (M m Ensure) = Just $ ensure m
+finalize1 (M m Ensure) = Just $ finalizer m
+finalize1 (M m Finalizer) = Just $ finalizer m
 finalize1 _ = Nothing
 
 infixl 9 >+>
@@ -250,9 +256,10 @@ infixl 9 >+>
 (>+>) :: Monad m => Pipe a b m r -> Pipe b c m r -> Pipe a c m r
 p1 >+> p2 = case (p1, p2) of
   (Free c1 h1, Free c2 h2) -> case compose c1 c2 of
-    AdvanceFirst comp -> catchP comp (return . h1) >>= \p1' -> p1' >+> p2
-    AdvanceSecond comp -> catchP comp (return . h2) >>= \p2' -> p1 >+> p2'
-    AdvanceBoth p1' p2' -> p1' >+> p2'
+    Nothing -> p1 >+> h2 (E.toException BrokenUpstreamPipe)
+    Just (AdvanceFirst comp) -> catchP comp (return . h1) >>= \p1' -> p1' >+> p2
+    Just (AdvanceSecond comp) -> catchP comp (return . h2) >>= \p2' -> p1 >+> p2'
+    Just (AdvanceBoth p1' p2') -> p1' >+> p2'
   (Throw e, Free c h) -> case finalize2 c of
     Nothing   -> p1 >+> h e
     Just comp -> catchP comp (return . h) >>= \p2' -> p1 >+> p2'
