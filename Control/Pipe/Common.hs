@@ -59,6 +59,7 @@ import qualified Control.Exception.Lifted as E
 import Control.Monad
 import Control.Monad.Trans (MonadTrans, lift)
 import Control.Monad.Trans.Control
+import Data.Maybe
 import Data.Typeable
 import Data.Void
 import Prelude hiding (id, (.), catch)
@@ -86,11 +87,10 @@ instance Exception BrokenUpstreamPipe
 
 -- | Type of action in the base monad.
 data MaskState
-  = Masked    -- ^ Action to be run with asynchronous exceptions masked.
-  | Unmasked  -- ^ Action to be run with asynchronous exceptions unmasked.
-  | Ensure    -- ^ Action to be run with priority with respect to downstream
-              --   actions, and asynchronous exceptions masked.
-  | Finalizer
+  = Masked                    -- ^ Action to be run with asynchronous exceptions masked.
+  | Unmasked                  -- ^ Action to be run with asynchronous exceptions unmasked.
+  | Ensure                    -- ^ Action to be run regardless of downstream failure.
+  | Finalizer SomeException   -- ^ Finalizer action.
 
 data PipeF a b m x
   = M (m x) MaskState
@@ -202,8 +202,8 @@ masked = liftP Masked
 ensure :: Monad m => m r -> Pipe a b m r
 ensure = liftP Ensure
 
-finalizer :: Monad m => m r -> Pipe a b m r
-finalizer = liftP Finalizer
+finalizer :: Monad m => SomeException -> m r -> Pipe a b m r
+finalizer e = liftP (Finalizer e)
 
 -- | Convert a pure function into a pipe.
 --
@@ -233,7 +233,7 @@ compose :: Monad m
 compose (Yield b x) (Await k) = Just $ AdvanceBoth x (k b)
 compose _ (Yield c y) = Just $ AdvanceSecond (yield c >> return y)
 compose _ (M m s) = Just $ AdvanceSecond (liftP s m)
-compose (M _ Finalizer) _ = Nothing
+compose (M _ (Finalizer _)) _ = Nothing
 compose (M m s) _ = Just $ AdvanceFirst (liftP s m)
 compose (Await k) _ = Just $ AdvanceFirst (liftM k await)
 
@@ -245,11 +245,16 @@ finalize2 (M m s) = Just $ liftP s m
 finalize2 (Yield c r) = Just $ yield c >> return r
 
 finalize1 :: Monad m
-          => PipeF a b m r
+          => Maybe SomeException
+          -> PipeF a b m r
           -> Maybe (Pipe a c m r)
-finalize1 (M m Ensure) = Just $ finalizer m
-finalize1 (M m Finalizer) = Just $ finalizer m
-finalize1 _ = Nothing
+finalize1 e c = case c of
+  M m Ensure -> go m
+  M m (Finalizer _) -> go m
+  _ -> Nothing
+  where
+    go m = Just $
+      finalizer (fromMaybe (E.toException BrokenUpstreamPipe) e) m
 
 infixl 9 >+>
 -- | Left to right pipe composition.
@@ -260,23 +265,22 @@ p1 >+> p2 = case (p1, p2) of
     Just (AdvanceFirst comp) -> catchP comp (return . h1) >>= \p1' -> p1' >+> p2
     Just (AdvanceSecond comp) -> catchP comp (return . h2) >>= \p2' -> p1 >+> p2'
     Just (AdvanceBoth p1' p2') -> p1' >+> p2'
-  (Throw e, Free c h) -> case finalize2 c of
-    Nothing   -> p1 >+> h e
-    Just comp -> catchP comp (return . h) >>= \p2' -> p1 >+> p2'
-  (Pure r, Free c h) -> case finalize2 c of
-    Nothing   -> p1 >+> h (E.toException BrokenUpstreamPipe)
-    Just comp -> catchP comp (return . h) >>= \p2' -> p1 >+> p2'
-  (Free c h, Throw e) -> case finalize1 c of
-    Nothing   -> h e >+> p2
-    Just comp -> catchP comp (return . h) >>= \p1' -> p1' >+> p2
-  (Free c h, Pure r) -> case finalize1 c of
-    Nothing   -> h (E.toException BrokenDownstreamPipe) >+> p2
-    Just comp -> catchP comp (return . h) >>= \p1' -> p1' >+> p2
+  (Throw e, Free c h) -> terminate2 c h (Just e)
+  (Pure r, Free c h) -> terminate2 c h Nothing
+  (Free c h, Throw e) -> terminate1 c h (Just e)
+  (Free c h, Pure r) -> terminate1 c h Nothing
   (Pure r, Throw e) -> case (E.fromException e :: Maybe BrokenUpstreamPipe) of
     Nothing -> throwP e
     Just _  -> return r
   (_, Throw e) -> throwP e
   (_, Pure r) -> return r
+  where
+    terminate1 c h e = case finalize1 e c of
+      Nothing   -> h (fromMaybe (E.toException BrokenDownstreamPipe) e) >+> p2
+      Just comp -> catchP comp (return . h) >>= \p1' -> p1' >+> p2
+    terminate2 c h e = case finalize2 c of
+      Nothing   -> p1 >+> h (fromMaybe (E.toException BrokenUpstreamPipe) e)
+      Just comp -> catchP comp (return . h) >>= \p2' -> p1 >+> p2'
 
 infixr 9 <+<
 -- | Right to left pipe composition.
