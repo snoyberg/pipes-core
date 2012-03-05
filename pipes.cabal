@@ -4,8 +4,8 @@ Cabal-Version: >=1.10.1
 Build-Type: Simple
 License: BSD3
 License-File: LICENSE
-Copyright: 2012 Gabriel Gonzalez
-Author: Gabriel Gonzalez
+Copyright: 2012 Gabriel Gonzalez, 2012 Paolo Capriotti
+Author: Gabriel Gonzalez, Paolo Capriotti
 Maintainer: Gabriel439@gmail.com
 Stability: Experimental
 Bug-Reports: mailto:Gabriel439@gmail.com
