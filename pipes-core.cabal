@@ -1,14 +1,14 @@
-Name: pipes
-Version: 1.1
+Name: pipes-core
+Version: 0.0.1
 Cabal-Version: >=1.10.1
 Build-Type: Simple
 License: BSD3
 License-File: LICENSE
 Copyright: 2012 Gabriel Gonzalez, 2012 Paolo Capriotti
 Author: Gabriel Gonzalez, Paolo Capriotti
-Maintainer: Gabriel439@gmail.com
+Maintainer: p.capriotti@gmail.com
 Stability: Experimental
-Bug-Reports: mailto:Gabriel439@gmail.com
+Bug-Reports: https://github.com/pcapriotti/Haskell-Pipes-Library/issues
 Synopsis: Compositional pipelines
 Description:
   This library offers an abstraction similar in scope to
@@ -45,7 +45,7 @@ Category: Control, Enumerator
 Tested-With: GHC ==7.0.3
 Source-Repository head
     Type: git
-    Location: https://github.com/Gabriel439/Haskell-Pipes-Library
+    Location: https://github.com/pcapriotti/Haskell-Pipes-Library
 
 Library
     Build-Depends: base >= 4 && < 5
