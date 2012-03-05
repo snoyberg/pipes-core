@@ -227,7 +227,6 @@ compose :: Monad m
    -> PipeF b c m y
    -> Composition a b c m x y
 compose (Yield b x) (Await k) = AdvanceBoth x (k b)
-compose (M m Ensure) _ = AdvanceFirst (liftP Ensure m)
 compose _ (Yield c y) = AdvanceSecond (yield c >> return y)
 compose _ (M m s) = AdvanceSecond (liftP s m)
 compose (M m s) _ = AdvanceFirst (liftP s m)
