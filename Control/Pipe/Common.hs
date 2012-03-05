@@ -23,7 +23,6 @@ module Control.Pipe.Common (
   await,
   yield,
   masked,
-  ensure,
 
   -- ** Basic combinators
   pipe,
@@ -50,6 +49,7 @@ module Control.Pipe.Common (
   throwP,
   catchP,
   liftP,
+  ensure,
   ) where
 
 import Control.Applicative
@@ -191,14 +191,7 @@ instance MonadTrans (Pipe a b) where
 masked :: Monad m => m r -> Pipe a b m r
 masked = liftP Masked
 
--- | Execute an action in the base monad with upstream priority.
---
--- Normally, downstream effects are given priority in pipe composition. Using
--- 'ensure' allows to change this behavior, and create an action which is
--- executed /before/ downstream actions and despite downstream termination.
---
--- Actions executed using 'ensure' are implicitly masked when the pipeline is
--- run with 'runPipe'.
+-- | Ensure an action is executed regardless of downstream termination.
 ensure :: Monad m => m r -> Pipe a b m r
 ensure = liftP Ensure
 
