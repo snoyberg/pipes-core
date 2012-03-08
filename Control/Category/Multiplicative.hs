@@ -1,5 +1,8 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 
+-- | This module contains Multiplicative and Comultiplicative type classes,
+-- which provide a generalization of 'splitP' and 'joinP' to arbitrary monoidal
+-- categories.
 module Control.Category.Multiplicative where
 
 import Control.Category.Monoidal
