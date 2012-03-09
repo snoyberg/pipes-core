@@ -24,3 +24,7 @@ Difference with traditional iteratees:
   Vertical concatenation can be combined with composition to create elaborate
   combinators, without the need of executing pipes in "passes" or resuming
   partially executed pipes.
+
+This library is based on the [pipes][1] package by Gabriel Gonzales.
+
+ [1]: http://hackage.haskell.org/package/pipes
