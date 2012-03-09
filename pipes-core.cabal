@@ -8,6 +8,7 @@ Copyright: 2012 Gabriel Gonzalez, 2012 Paolo Capriotti
 Author: Gabriel Gonzalez, Paolo Capriotti
 Maintainer: p.capriotti@gmail.com
 Stability: Experimental
+Homepage: https://github.com/pcapriotti/pipes-core
 Bug-Reports: https://github.com/pcapriotti/pipes-core/issues
 Synopsis: Compositional pipelines
 Description:
