@@ -108,9 +108,9 @@ instance Monad m => Functor (PipeF a b m) where
 --
 --  [@b@] The type of output delivered to downstream pipes.
 --
---  [@c@] The base monad.
+--  [@m@] The base monad.
 --
---  [@d@] The type of the monad's final result.
+--  [@r@] The type of the monad's final result.
 data Pipe a b m r
   -- Pipe is a free monad over the functor
   --
