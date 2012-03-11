@@ -252,28 +252,33 @@ finalize1 e c = case c of
 infixl 9 >+>
 -- | Left to right pipe composition.
 (>+>) :: Monad m => Pipe a b m r -> Pipe b c m r -> Pipe a c m r
-p1 >+> p2 = case (p1, p2) of
-  (Free c1 h1, Free c2 h2) -> case compose c1 c2 of
-    Left e -> p1 >+> h2 e
-    Right (AdvanceFirst comp) -> catchP comp (return . h1) >>= \p1' -> p1' >+> p2
-    Right (AdvanceSecond comp) -> catchP comp (return . h2) >>= \p2' -> p1 >+> p2'
-    Right (AdvanceBoth p1' p2') -> p1' >+> p2'
-  (Throw e, Free c h) -> terminate2 c h (Just e)
-  (Pure r, Free c h) -> terminate2 c h Nothing
-  (Free c h, Throw e) -> terminate1 c h (Just e)
-  (Free c h, Pure r) -> terminate1 c h Nothing
-  (Pure r, Throw e) -> case (E.fromException e :: Maybe BrokenUpstreamPipe) of
-    Nothing -> throwP e
-    Just _  -> return r
-  (_, Throw e) -> throwP e
-  (_, Pure r) -> return r
+p1 >+> p2 = go Nothing p1 p2
   where
-    terminate1 c h e = case finalize1 e c of
-      Nothing   -> h (fromMaybe (E.toException BrokenDownstreamPipe) e) >+> p2
-      Just comp -> catchP comp (return . h) >>= \p1' -> p1' >+> p2
-    terminate2 c h e = case finalize2 c of
-      Nothing   -> p1 >+> h (fromMaybe (E.toException BrokenUpstreamPipe) e)
-      Just comp -> catchP comp (return . h) >>= \p2' -> p1 >+> p2'
+    go hu p1 p2 = case (hu, p1, p2) of
+      (_, Free c1 h1, Free c2 h2) -> case compose c1 c2 of
+        Left e -> go hu p1 (h2 e)
+        Right (AdvanceFirst comp) -> catchP comp (return . h1) >>= \p1' -> p1' >+> p2
+        Right (AdvanceSecond comp) -> catchP comp (return . h2) >>= \p2' -> go hu p1 p2'
+        Right (AdvanceBoth p1' p2') -> go (Just h1) p1' p2'
+      (_, Throw e, Free c h) -> terminate2 c h (Just e)
+      (_, Pure r, Free c h) -> terminate2 c h Nothing
+      (_, Free c h, Pure r) -> terminate1 c (fromMaybe throwP hu) Nothing
+      (_, Free c h, Throw e) -> terminate1 c (fromMaybe throwP hu) (Just e)
+      (_, Pure r, Throw e) -> case (E.fromException e :: Maybe BrokenUpstreamPipe) of
+        Nothing -> fromMaybe throwP hu e >+> throwP e
+        Just _  -> return r
+      (_, Throw e1, Throw e2) -> case (E.fromException e2 :: Maybe BrokenUpstreamPipe) of
+        Nothing -> throwP e2
+        Just _ -> throwP e1
+      (Just hu, _, Pure r) -> hu (E.toException BrokenDownstreamPipe) >+> p2
+      (Nothing, _, Pure r) -> return r
+      where
+        terminate1 c h e = case finalize1 e c of
+          Nothing   -> h (fromMaybe (E.toException BrokenDownstreamPipe) e) >+> p2
+          Just comp -> catchP comp (return . h) >>= \p1' -> p1' >+> p2
+        terminate2 c h e = case finalize2 c of
+          Nothing   -> go hu p1 (h (fromMaybe (E.toException BrokenUpstreamPipe) e))
+          Just comp -> catchP comp (return . h) >>= \p2' -> go hu p1 p2'
 
 infixr 9 <+<
 -- | Right to left pipe composition.

@@ -92,6 +92,25 @@ prop_finalizer_assoc xs = runWriter (runPurePipe_ p) == runWriter (runPurePipe_ 
     p2 = void await
     p3 = tryAwait >>= lift . tell . return
 
+prop_yield_failure :: Bool
+prop_yield_failure = runWriter (runPurePipe_ p) == runWriter (runPurePipe_ p')
+  where
+    p = p1 >+> return ()
+    p' = (p1 >+> idP) >+> return ()
+    p1 = yield () >> ensure (tell [1])
+
+prop_yield_failure_assoc :: Bool
+prop_yield_failure_assoc = runWriter (runPurePipe_ p) == runWriter (runPurePipe_ p')
+  where
+    p = p1 >+> (idP >+> return ())
+    p' = (p1 >+> idP) >+> return ()
+    p1 = yield () >> ensure (tell [1])
+
+prop_bup_leak :: Bool
+prop_bup_leak = either (const False) (== ()) . runIdentity . runPurePipe $ p
+  where
+    p = yield () >+> (await >> await >> return ())
+
 main = defaultMain $ [
   testGroup "properties" $
     [ testProperty "fold" prop_fold
@@ -107,5 +126,8 @@ main = defaultMain $ [
     , testProperty "groupBy" prop_groupBy
     , testProperty "filter" prop_filter
     , testProperty "finalizer assoc" prop_finalizer_assoc
+    , testProperty "yield failure" prop_yield_failure
+    , testProperty "yield failure assoc" prop_yield_failure_assoc
+    , testProperty "bup leak" prop_bup_leak
     ]
   ]
