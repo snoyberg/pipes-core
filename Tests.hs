@@ -97,19 +97,25 @@ prop_yield_failure = runWriter (runPurePipe_ p) == runWriter (runPurePipe_ p')
   where
     p = p1 >+> return ()
     p' = (p1 >+> idP) >+> return ()
-    p1 = yield () >> ensure (tell [1])
+    p1 = yield () >> lift (tell [1])
 
 prop_yield_failure_assoc :: Bool
 prop_yield_failure_assoc = runWriter (runPurePipe_ p) == runWriter (runPurePipe_ p')
   where
     p = p1 >+> (idP >+> return ())
     p' = (p1 >+> idP) >+> return ()
-    p1 = yield () >> ensure (tell [1])
+    p1 = yield () >> lift (tell [1])
 
 prop_bup_leak :: Bool
 prop_bup_leak = either (const False) (== ()) . runIdentity . runPurePipe $ p
   where
     p = yield () >+> (await >> await >> return ())
+
+prop_lift_assoc :: Bool
+prop_lift_assoc = runWriter (runPurePipe_ p) == runWriter (runPurePipe_ p')
+  where
+    p = (lift (tell [1]) >+> yield ()) >+> return ()
+    p' = lift (tell [1]) >+> (yield () >+> return ())
 
 main = defaultMain $ [
   testGroup "properties" $
@@ -129,5 +135,6 @@ main = defaultMain $ [
     , testProperty "yield failure" prop_yield_failure
     , testProperty "yield failure assoc" prop_yield_failure_assoc
     , testProperty "bup leak" prop_bup_leak
+    , testProperty "lift assoc" prop_lift_assoc
     ]
   ]

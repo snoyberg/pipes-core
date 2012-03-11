@@ -28,13 +28,10 @@ import Prelude hiding (catch)
 -- > safeReader = catch (reader >+> 'Pipe' Right) $ \e -> do
 -- >   yield $ Left e
 --
--- Note that there is no guarantee that the handler will actually be executed,
--- as any action in a 'Pipe': 'Pipe's at either side can terminate before the
--- handler has a chance to be executed.
---
--- It is therefore common to use 'ensure' within an exception handler to
--- perform cleanup or finalization of resources.  However, we recommend using
--- 'finally' or 'bracket' for such use cases.
+-- Note that only the initial monadic actions contained in a handler are
+-- guaranteed to be executed.  Anything else is subject to the usual
+-- termination rule of 'Pipe's: if a 'Pipe' at either side terminates, the
+-- whole pipeline terminates.
 catch :: (Monad m, E.Exception e)
       => Pipe a b m r               -- ^ 'Pipe' to run
       -> (e -> Pipe a b m r)        -- ^ handler function
@@ -69,8 +66,8 @@ finally :: Monad m
         -> m s                    -- ^ finalizer action
         -> Pipe a b m r
 finally p w = do
-  r <- onException p (ensure w)
-  ensure w
+  r <- onException p (masked w)
+  masked w
   return r
 
 -- | Allocate a resource within the base monad, run a 'Pipe', then ensure the
@@ -91,7 +88,7 @@ bracket :: Monad m
         -> (r -> Pipe a b m x)  -- ^ 'Pipe' to run in between
         -> Pipe a b m x
 bracket open close run = do
-  r <- liftP Masked open
+  r <- masked open
   finally (run r) (close r)
 
 -- | A variant of 'bracket' where the return value from the allocation action
@@ -112,5 +109,5 @@ bracketOnError :: Monad m
                -> (r -> Pipe a b m x)     -- ^ 'Pipe' to run in between
                -> Pipe a b m x
 bracketOnError open close run = do
-  r <- liftP Masked open
-  onException (run r) (ensure $ close r)
+  r <- masked open
+  onException (run r) (masked $ close r)

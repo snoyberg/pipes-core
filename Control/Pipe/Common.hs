@@ -49,7 +49,6 @@ module Control.Pipe.Common (
   throwP,
   catchP,
   liftP,
-  ensure,
   ) where
 
 import Control.Applicative
@@ -89,7 +88,6 @@ instance Exception BrokenUpstreamPipe
 data MaskState
   = Masked                    -- ^ Action to be run with asynchronous exceptions masked.
   | Unmasked                  -- ^ Action to be run with asynchronous exceptions unmasked.
-  | Ensure                    -- ^ Action to be run regardless of downstream failure.
   | Finalizer SomeException   -- ^ Finalizer action.
 
 data PipeF a b m x
@@ -191,10 +189,6 @@ instance MonadTrans (Pipe a b) where
 masked :: Monad m => m r -> Pipe a b m r
 masked = liftP Masked
 
--- | Ensure an action is executed regardless of downstream termination.
-ensure :: Monad m => m r -> Pipe a b m r
-ensure = liftP Ensure
-
 finalizer :: Monad m => SomeException -> m r -> Pipe a b m r
 finalizer e = liftP (Finalizer e)
 
@@ -237,18 +231,6 @@ finalize2 (Await _) = Nothing
 finalize2 (M m s) = Just $ liftP s m
 finalize2 (Yield c r) = Just $ yield c >> return r
 
-finalize1 :: Monad m
-          => Maybe SomeException
-          -> PipeF a b m r
-          -> Maybe (Pipe a c m r)
-finalize1 e c = case c of
-  M m Ensure -> go m
-  M m (Finalizer _) -> go m
-  _ -> Nothing
-  where
-    go m = Just $
-      finalizer (fromMaybe (E.toException BrokenUpstreamPipe) e) m
-
 infixl 9 >+>
 -- | Left to right pipe composition.
 (>+>) :: Monad m => Pipe a b m r -> Pipe b c m r -> Pipe a c m r
@@ -256,26 +238,27 @@ p1 >+> p2 = go Nothing p1 p2
   where
     go hu p1 p2 = case (hu, p1, p2) of
       (_, Free c1 h1, Free c2 h2) -> case compose c1 c2 of
-        Left e -> go hu p1 (h2 e)
+        Left e -> go (Just h) p1 (h2 e) where h _ = p1
         Right (AdvanceFirst comp) -> catchP comp (return . h1) >>= \p1' -> p1' >+> p2
         Right (AdvanceSecond comp) -> catchP comp (return . h2) >>= \p2' -> go hu p1 p2'
         Right (AdvanceBoth p1' p2') -> go (Just h1) p1' p2'
       (_, Throw e, Free c h) -> terminate2 c h (Just e)
       (_, Pure r, Free c h) -> terminate2 c h Nothing
-      (_, Free c h, Pure r) -> terminate1 c (fromMaybe throwP hu) Nothing
-      (_, Free c h, Throw e) -> terminate1 c (fromMaybe throwP hu) (Just e)
+      (_, Free c h, Pure r) -> terminate1 (E.toException BrokenUpstreamPipe)
+                                 (fromMaybe throwP hu (E.toException BrokenDownstreamPipe))
+      (_, Free c h, Throw e) -> terminate1 e (fromMaybe throwP hu e)
       (_, Pure r, Throw e) -> case (E.fromException e :: Maybe BrokenUpstreamPipe) of
-        Nothing -> fromMaybe throwP hu e >+> throwP e
+        Nothing -> terminate1 e (fromMaybe throwP hu e) where e = E.toException BrokenUpstreamPipe
         Just _  -> return r
       (_, Throw e1, Throw e2) -> case (E.fromException e2 :: Maybe BrokenUpstreamPipe) of
-        Nothing -> throwP e2
+        Nothing -> maybe (throwP e2) (\h -> terminate1 e2 (h e2)) hu
         Just _ -> throwP e1
-      (Just hu, _, Pure r) -> hu (E.toException BrokenDownstreamPipe) >+> p2
+      (Just hu, _, Pure r) -> terminate1 e (hu e) where e = E.toException BrokenDownstreamPipe
       (Nothing, _, Pure r) -> return r
       where
-        terminate1 c h e = case finalize1 e c of
-          Nothing   -> h (fromMaybe (E.toException BrokenDownstreamPipe) e) >+> p2
-          Just comp -> catchP comp (return . h) >>= \p1' -> p1' >+> p2
+        terminate1 e p = case p of
+          Free (M m s) h -> catchP (finalizer e m) (return . h) >>= terminate1 e
+          _              -> p >+> p2
         terminate2 c h e = case finalize2 c of
           Nothing   -> go hu p1 (h (fromMaybe (E.toException BrokenUpstreamPipe) e))
           Just comp -> catchP comp (return . h) >>= \p2' -> go hu p1 p2'
