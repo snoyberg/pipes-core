@@ -222,13 +222,13 @@ data Composition a b c m x y
 compose :: Monad m
    => PipeF a b m x
    -> PipeF b c m y
-   -> Maybe (Composition a b c m x y)
-compose (Yield b x) (Await k) = Just $ AdvanceBoth x (k b)
-compose _ (Yield c y) = Just $ AdvanceSecond (yield c >> return y)
-compose _ (M m s) = Just $ AdvanceSecond (liftP s m)
-compose (M _ (Finalizer _)) _ = Nothing
-compose (M m s) _ = Just $ AdvanceFirst (liftP s m)
-compose (Await k) _ = Just $ AdvanceFirst (liftM k await)
+   -> Either SomeException (Composition a b c m x y)
+compose (Yield b x) (Await k) = Right $ AdvanceBoth x (k b)
+compose _ (Yield c y) = Right $ AdvanceSecond (yield c >> return y)
+compose _ (M m s) = Right $ AdvanceSecond (liftP s m)
+compose (M _ (Finalizer e)) _ = Left e
+compose (M m s) _ = Right $ AdvanceFirst (liftP s m)
+compose (Await k) _ = Right $ AdvanceFirst (liftM k await)
 
 finalize2 :: Monad m
           => PipeF b c m r
@@ -254,10 +254,10 @@ infixl 9 >+>
 (>+>) :: Monad m => Pipe a b m r -> Pipe b c m r -> Pipe a c m r
 p1 >+> p2 = case (p1, p2) of
   (Free c1 h1, Free c2 h2) -> case compose c1 c2 of
-    Nothing -> p1 >+> h2 (E.toException BrokenUpstreamPipe)
-    Just (AdvanceFirst comp) -> catchP comp (return . h1) >>= \p1' -> p1' >+> p2
-    Just (AdvanceSecond comp) -> catchP comp (return . h2) >>= \p2' -> p1 >+> p2'
-    Just (AdvanceBoth p1' p2') -> p1' >+> p2'
+    Left e -> p1 >+> h2 e
+    Right (AdvanceFirst comp) -> catchP comp (return . h1) >>= \p1' -> p1' >+> p2
+    Right (AdvanceSecond comp) -> catchP comp (return . h2) >>= \p2' -> p1 >+> p2'
+    Right (AdvanceBoth p1' p2') -> p1' >+> p2'
   (Throw e, Free c h) -> terminate2 c h (Just e)
   (Pure r, Free c h) -> terminate2 c h Nothing
   (Free c h, Throw e) -> terminate1 c h (Just e)
