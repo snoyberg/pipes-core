@@ -25,6 +25,6 @@ Difference with traditional iteratees:
   combinators, without the need of executing pipes in "passes" or resuming
   partially executed pipes.
 
-This library is based on the [pipes][1] package by Gabriel Gonzales.
+This library is based on the [pipes][1] package by Gabriel Gonzalez.
 
  [1]: http://hackage.haskell.org/package/pipes
