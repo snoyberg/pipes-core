@@ -203,6 +203,13 @@ protect w p = go p
     go (M s m h) = M s (liftM go m) (go . h)
     go (Yield x p w') = Yield x (go p) (w ++ w')
 
+handleBP :: Monad m => r -> Pipe a b m r -> Pipe a b m r
+handleBP r p = catchP p h
+  where
+    h e
+      | isBrokenPipe e = return r
+      | otherwise      = throwP e
+
 bp :: SomeException
 bp = E.toException BrokenPipe
 
@@ -218,26 +225,18 @@ p1 >+> p2 = case (p1, p2) of
   (_, M s m h2) -> M s (m >>= \p2' -> return $ p1 >+> p2')
                        (\e -> p1 >+> h2 e)
   (_, Pure r w) -> Pure r w
-  (_, Throw e w) -> terminate p1 e w
+  (_, Throw e w) -> Throw e w
 
   -- upstream step
   (M s m h1, Await _ _) -> M s (m >>= \p1' -> return $ p1' >+> p2)
                                (\e -> h1 e >+> p2)
   (Await k h1, Await _ _) -> Await (\a -> k a >+> p2)
                                    (\e -> h1 e >+> p2)
-  (Pure r w, Await _ h2) -> p1 >+> protect w (h2 bp)
+  (Pure r w, Await _ h2) -> p1 >+> handleBP r (protect w (h2 bp))
   (Throw e w, Await _ h2) -> p1 >+> protect w (h2 e)
 
   -- flow data
   (Yield x p1' w, Await k _) -> p1' >+> protect w (k x)
-
-  where
-    terminate p1 e w
-      | isBrokenPipe e
-      , Pure r _ <- p1
-      = Pure r w
-      | otherwise
-      = Throw e w
 
 infixr 9 <+<
 -- | Right to left pipe composition.
