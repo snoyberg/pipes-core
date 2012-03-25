@@ -37,6 +37,7 @@ module Control.Pipe.Common (
   runPurePipe_,
 
   -- ** Low level types
+  BrokenPipe,
   MaskState(..),
 
   -- ** Low level primitives
