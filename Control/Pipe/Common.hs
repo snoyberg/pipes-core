@@ -110,7 +110,12 @@ type Pipeline m = Pipe () Void m
 
 instance Monad m => Monad (Pipe a b m) where
   return r = Pure r []
-  Pure r w >>= f = protect w (f r)
+  Pure r w >>= f = case f r of
+    Pure r' w' -> Pure r' (w ++ w')
+    Throw e w' -> Throw e (w ++ w')
+    p'         -> foldr run p' w
+      where
+        run m p = M Masked (m >> return p) throwP
   Throw e w >>= _ = Throw e w
   Await k h >>= f = Await (k >=> f) (h >=> f)
   M s m h >>= f = M s (m >>= \p -> return $ p >>= f) (h >=> f)
@@ -133,7 +138,10 @@ catchP :: Monad m
        -> (SomeException -> Pipe a b m r)
        -> Pipe a b m r
 catchP (Pure r w) _ = Pure r w
-catchP (Throw e w) h = protect w (h e)
+catchP (Throw e w) h = case h e of
+  Pure r w'   -> Pure r (w ++ w')
+  Throw e' w' -> Throw e' (w ++ w')
+  p'          -> mapM_ masked w >> p'
 catchP (Await k h) h' = Await (\a -> catchP (k a) h')
                               (\e -> catchP (h e) h')
 catchP (M s m h) h' = M s (m >>= \p' -> return $ catchP p' h')
