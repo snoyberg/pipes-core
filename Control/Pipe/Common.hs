@@ -205,11 +205,15 @@ protect w p = go p
     go (Yield x p w') = Yield x (go p) (w ++ w')
 
 handleBP :: Monad m => r -> Pipe a b m r -> Pipe a b m r
-handleBP r p = catchP p h
+handleBP r p = go p
   where
-    h e
-      | isBrokenPipe e = return r
-      | otherwise      = throwP e
+    go (Pure r w) = Pure r w
+    go (Await k h) = Await k h
+    go (M s m h) = M s (liftM go m) (go . h)
+    go (Yield x p w) = Yield x (go p) w
+    go (Throw e w)
+      | isBrokenPipe e = Pure r w
+      | otherwise      = Throw e w
 
 bp :: SomeException
 bp = E.toException BrokenPipe
