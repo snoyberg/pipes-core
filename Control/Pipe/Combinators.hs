@@ -53,7 +53,7 @@ import Prelude hiding (until, take, drop, concatMap, filter, takeWhile, dropWhil
 -- 'Nothing', whereas calling 'await' will terminate the current pipe
 -- immediately.
 tryAwait :: Monad m => Pipe a b m (Maybe a)
-tryAwait = catch (Just <$> await) $ \(_ :: BrokenUpstreamPipe) -> return Nothing
+tryAwait = catch (Just <$> await) $ \(_ :: BrokenPipe) -> return Nothing
 
 -- | Execute the specified pipe for each value in the input stream.
 --
@@ -154,12 +154,8 @@ feed :: Monad m => a -> Pipe a b m r -> Pipe a b m r
 -- this could be implemented as
 -- feed x p = (yield x >> idP) >+> p
 -- but this version is more efficient
-feed _ (Pure r) = return r
-feed _ (Throw e) = throw e
-feed a (Free c h) = case go a c of
-  (False, p) -> p >>= feed a
-  (True, p)  -> join p
-  where
-    go a (Await k) = (True, return $ k a)
-    go _ (Yield y c) = (False, yield y >> return c)
-    go _ (M m s) = (False, liftP s m)
+feed _ (Pure r w) = Pure r w
+feed _ (Throw e w) = Throw e w
+feed a (Yield x b w) = Yield x (feed a b) w
+feed a (M s m h) = M s (liftM (feed a) m) (feed a . h)
+feed a (Await k h) = k a

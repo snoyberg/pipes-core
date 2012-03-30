@@ -31,31 +31,29 @@ import Control.Pipe.Common
 firstP :: Monad m
        => Pipe a b m r
        -> Pipe (Either a c) (Either b c) m r
-firstP (Pure r) = return r
-firstP (Throw e) = Throw e
-firstP (Free c h) = catchP (step c) (return . h) >>= firstP
+firstP (Pure r w) = Pure r w
+firstP (Throw e w) = Throw e w
+firstP (Yield x p w) = Yield (Left x) (firstP p) w
+firstP (M s m h) = M s (liftM firstP m) (firstP . h)
+firstP (Await k h) = go
   where
-    step (M m s) = liftP s m
-    step (Yield b x) = yield (Left b) >> return x
-    step (Await k) = go
-      where
-        go = await >>= either (return . k)
-                              (yield . Right >=> const go)
+    go = Await (either (firstP . k)
+                       (yield . Right >=> const go))
+               (firstP . h)
 
 -- | This function is the equivalent of 'firstP' for the right component.
 secondP :: Monad m
         => Pipe a b m r
         -> Pipe (Either c a) (Either c b) m r
-secondP (Pure r) = return r
-secondP (Throw e) = Throw e
-secondP (Free c h) = catchP (step c) (return . h) >>= secondP
+secondP (Pure r w) = Pure r w
+secondP (Throw e w) = Throw e w
+secondP (Yield x p w) = Yield (Right x) (secondP p) w
+secondP (M s m h) = M s (liftM secondP m) (secondP . h)
+secondP (Await k h) = go
   where
-    step (M m s) = liftP s m
-    step (Yield b x) = yield (Right b) >> return x
-    step (Await k) = go
-      where
-        go = await >>= either (yield . Left >=> const go)
-                              (return . k)
+    go = Await (either (yield . Left >=> const go)
+                       (secondP . k))
+               (secondP . h)
 
 -- | Combine two pipes into a single pipe that behaves like the first on the
 -- left component, and the second on the right component.
@@ -116,13 +114,12 @@ dequeue (Queue [] ys) = dequeue (Queue (reverse ys) [])
 loopP :: Monad m => Pipe (Either a c) (Either b c) m r -> Pipe a b m r
 loopP = go emptyQueue
   where
-    go _ (Pure r) = return r
-    go _ (Throw e) = throwP e
-    go q (Free c h) = case step q c of
-      (q', p') -> catchP p' (return . h) >>= go q'
-
-    step q (Await k) = case dequeue q of
-      (q', x) -> (q', maybe (liftM (k . Left) await) (return . k . Right) x)
-    step q (Yield (Right x) c) = (enqueue x q, return c)
-    step q (Yield (Left x) c) = (q, yield x >> return c)
-    step q (M m s) = (q, liftP s m)
+    go :: Monad m => Queue c -> Pipe (Either a c) (Either b c) m r -> Pipe a b m r
+    go _ (Pure r w) = Pure r w
+    go _ (Throw e w) = Throw e w
+    go q (Yield (Right x) p w) = go (enqueue x q) p
+    go q (Yield (Left x) p w) = Yield x (go q p) w
+    go q (M s m h) = M s (liftM (go q) m) (go q . h)
+    go q (Await k h) = case dequeue q of
+      (q', Nothing) -> Await (go q' . k . Left) (go q' . h)
+      (q', Just x) -> go q' $ k (Right x)
