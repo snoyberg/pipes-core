@@ -159,3 +159,4 @@ feed _ (Throw e w) = Throw e w
 feed a (Yield x b w) = Yield x (feed a b) w
 feed a (M s m h) = M s (liftM (feed a) m) (feed a . h)
 feed a (Await k h) = k a
+feed a p@(Transform t) = yield (t a) >> p
