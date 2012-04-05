@@ -33,6 +33,7 @@ firstP :: Monad m
        -> Pipe (Either a c) (Either b c) m r
 firstP (Pure r w) = Pure r w
 firstP (Throw e w) = Throw e w
+firstP (Transform t) = Transform $ either (Left . t) Right
 firstP (Yield x p w) = Yield (Left x) (firstP p) w
 firstP (M s m h) = M s (liftM firstP m) (firstP . h)
 firstP (Await k h) = go
@@ -47,6 +48,7 @@ secondP :: Monad m
         -> Pipe (Either c a) (Either c b) m r
 secondP (Pure r w) = Pure r w
 secondP (Throw e w) = Throw e w
+secondP (Transform t) = Transform $ either Left (Right . t)
 secondP (Yield x p w) = Yield (Right x) (secondP p) w
 secondP (M s m h) = M s (liftM secondP m) (secondP . h)
 secondP (Await k h) = go
@@ -109,6 +111,9 @@ dequeue (Queue (x : xs) ys) = (Queue xs ys, Just x)
 dequeue q@(Queue [] []) = (q, Nothing)
 dequeue (Queue [] ys) = dequeue (Queue (reverse ys) [])
 
+elements :: Queue a -> [a]
+elements (Queue xs ys) = xs ++ reverse ys
+
 -- | The 'loopP' combinator allows to create 'Pipe's whose output value is fed
 -- back to the 'Pipe' as input.
 loopP :: Monad m => Pipe (Either a c) (Either b c) m r -> Pipe a b m r
@@ -119,6 +124,11 @@ loopP = go emptyQueue
     go _ (Throw e w) = Throw e w
     go q (Yield (Right x) p w) = go (enqueue x q) p
     go q (Yield (Left x) p w) = Yield x (go q p) w
+    go q p@(Transform t) = do
+      mapM_ (yield . rt . Right) (elements q)
+      Transform $ rt . Left
+      where
+        rt = either id (rt . Right) . t
     go q (M s m h) = M s (liftM (go q) m) (go q . h)
     go q (Await k h) = case dequeue q of
       (q', Nothing) -> Await (go q' . k . Left) (go q' . h)

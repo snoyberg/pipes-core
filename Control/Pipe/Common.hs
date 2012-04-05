@@ -99,6 +99,7 @@ data Pipe a b m r
   | M MaskState (m (Pipe a b m r))
                 (SomeException -> Pipe a b m r)
   | Yield b (Pipe a b m r) (Finalizer m)
+  | Transform (a -> b)
 
 -- | A pipe that can only produce values.
 type Producer b m = Pipe () b m
@@ -118,6 +119,7 @@ instance Monad m => Monad (Pipe a b m) where
       where
         run m p = M Masked (m >> return p) throwP
   Throw e w >>= _ = Throw e w
+  Transform t >>= _ = Transform t
   Await k h >>= f = Await (k >=> f) (h >=> f)
   M s m h >>= f = M s (m >>= \p -> return $ p >>= f) (h >=> f)
   Yield x p w >>= f = Yield x (p >>= f) w
@@ -143,6 +145,7 @@ catchP (Throw e w) h = case h e of
   Pure r w'   -> Pure r (w ++ w')
   Throw e' w' -> Throw e' (w ++ w')
   p'          -> mapM_ masked w >> p'
+catchP (Transform t) h = Transform t
 catchP (Await k h) h' = Await (\a -> catchP (k a) h')
                               (\e -> catchP (h e) h')
 catchP (M s m h) h' = M s (m >>= \p' -> return $ catchP p' h')
@@ -185,7 +188,7 @@ masked = liftP Masked
 -- >   x <- await
 -- >   yield (f x)
 pipe :: Monad m => (a -> b) -> Pipe a b m r
-pipe f = forever $ await >>= yield . f
+pipe = Transform
 
 -- | The identity pipe.
 idP :: Monad m => Pipe a a m r
@@ -200,6 +203,7 @@ protect w p = go p
   where
     go (Pure r w') = Pure r (w ++ w')
     go (Throw e w') = Throw e (w ++ w')
+    go (Transform t) = Transform t
     go (Await k h) = Await k h
     go (M s m h) = M s (liftM go m) (go . h)
     go (Yield x p w') = Yield x (go p) (w ++ w')
@@ -208,6 +212,7 @@ handleBP :: Monad m => r -> Pipe a b m r -> Pipe a b m r
 handleBP r p = go p
   where
     go (Pure r w) = Pure r w
+    go (Transform t) = Transform t
     go (Await k h) = Await k h
     go (M s m h) = M s (liftM go m) (go . h)
     go (Yield x p w) = Yield x (go p) w
@@ -233,15 +238,21 @@ p1 >+> p2 = case (p1, p2) of
   (_, Throw e w) -> Throw e w
 
   -- upstream step
-  (M s m h1, Await _ _) -> M s (m >>= \p1' -> return $ p1' >+> p2)
+  (M s m h1, _) -> M s (m >>= \p1' -> return $ p1' >+> p2)
                                (\e -> h1 e >+> p2)
-  (Await k h1, Await _ _) -> Await (\a -> k a >+> p2)
+  (Await k h1, _) -> Await (\a -> k a >+> p2)
                                    (\e -> h1 e >+> p2)
   (Pure r w, Await _ h2) -> p1 >+> handleBP r (protect w (h2 bp))
+  (Pure r w, Transform t) -> Pure r w
   (Throw e w, Await _ h2) -> p1 >+> protect w (h2 e)
+  (Throw e w, Transform _) -> Throw e w
+  (Transform t, Await k h) -> Await (\a -> p1 >+> k (t a))
+                                    (\e -> p1 >+> h e)
 
   -- flow data
   (Yield x p1' w, Await k _) -> p1' >+> protect w (k x)
+  (Transform t1, Transform t2) -> Transform (t2 . t1)
+  (Yield x p1' w, Transform t) -> Yield (t x) (p1' >+> p2) w
 
 infixr 9 <+<
 -- | Right to left pipe composition.
@@ -264,6 +275,7 @@ runPipe p = E.mask $ \restore -> run restore p
         go (Throw e w) = fin w >> E.throwIO e
         go (Await k h) = go (k ())
         go (Yield x _ _) = absurd x
+        go (Transform _) = error "infinite pipeline"
         go (M s m h) = try s m >>= \r -> case r of
           Left e   -> go $ h e
           Right p' -> go p'
@@ -288,6 +300,7 @@ runPurePipe (Throw e w) = sequence_ w >> return (Left e)
 runPurePipe (Await k _) = runPurePipe $ k ()
 runPurePipe (Yield x _ _) = absurd x
 runPurePipe (M s m h) = m >>= runPurePipe
+runPurePipe (Transform _) = error "infinite pipeline"
 
 -- | A version of 'runPurePipe' which rethrows any captured exception instead
 -- of returning it.
