@@ -48,17 +48,13 @@ instance Monad m => Bifunctor Either (PipeC m r) (PipeC m r) (PipeC m r) where
 
 instance Monad m => Associative (PipeC m r) Either where
   associate = PipeC associateP
-
-instance Monad m => Disassociative (PipeC m r) Either where
   disassociate = PipeC disassociateP
 
-type instance Id (PipeC m r) Either = Void
-
 instance Monad m => Monoidal (PipeC m r) Either where
+  type Id (PipeC m r) Either = Void
+
   idl = arr idl
   idr = arr idr
-
-instance Monad m => Comonoidal (PipeC m r) Either where
   coidl = arr coidl
   coidr = arr coidr
 

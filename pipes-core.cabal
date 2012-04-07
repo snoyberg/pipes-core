@@ -51,7 +51,7 @@ Source-Repository head
 Library
     Build-Depends: base >= 4 && < 5
                  , mtl
-                 , categories
+                 , categories (== 1.0.*)
                  , void
                  , lifted-base
                  , monad-control
