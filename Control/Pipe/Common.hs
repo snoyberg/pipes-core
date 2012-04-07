@@ -54,7 +54,7 @@ import Control.Category
 import Control.Exception (SomeException, Exception)
 import qualified Control.Exception.Lifted as E
 import Control.Monad
-import Control.Monad.Trans (MonadTrans, lift)
+import Control.Monad.Trans
 import Control.Monad.Trans.Control
 import Data.Maybe
 import Data.Typeable
@@ -171,6 +171,9 @@ liftP s m = M s (liftM return m) throwP
 
 instance MonadTrans (Pipe a b) where
   lift = liftP Unmasked
+
+instance MonadIO m => MonadIO (Pipe a b m) where
+  liftIO = lift . liftIO
 
 -- | Execute an action in the base monad with asynchronous exceptions masked.
 --
