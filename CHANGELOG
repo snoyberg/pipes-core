@@ -1,5 +1,6 @@
 ## Version 0.1.0 (unreleased)
 
+- Significant simplification of the internals.
 - Removed `ensure` primitive.
 
 ## Version 0.0.1 (09 Mar 2012)
