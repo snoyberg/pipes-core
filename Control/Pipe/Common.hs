@@ -54,7 +54,8 @@ import Control.Category
 import Control.Exception (SomeException, Exception)
 import qualified Control.Exception.Lifted as E
 import Control.Monad
-import Control.Monad.Trans
+import Control.Monad.IO.Class
+import Control.Monad.Trans.Class
 import Control.Monad.Trans.Control
 import Data.Maybe
 import Data.Typeable

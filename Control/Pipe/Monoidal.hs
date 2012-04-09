@@ -22,8 +22,7 @@ import Control.Category.Associative
 import Control.Category.Braided
 import Control.Category.Monoidal
 import Control.Monad
-import qualified Control.Monad.Trans as T
-import Control.Monad.State
+import Control.Monad.IO.Class
 import Control.Pipe.Common
 
 -- | Create a 'Pipe' that behaves like the given 'Pipe' of the left component
