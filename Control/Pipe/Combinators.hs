@@ -115,7 +115,7 @@ takeWhile p = go
 
 -- | Variation of 'takeWhile' returning @()@.
 takeWhile_ :: Monad m => (a -> Bool) -> Pipe a a m ()
-takeWhile_ p = takeWhile p >> return ()
+takeWhile_ = void . takeWhile
 
 -- | Remove inputs as long as they satisfy the given predicate, then act as an
 -- identity.
@@ -158,4 +158,4 @@ feed _ (Pure r w) = Pure r w
 feed _ (Throw e w) = Throw e w
 feed a (Yield x b w) = Yield x (feed a b) w
 feed a (M s m h) = M s (liftM (feed a) m) (feed a . h)
-feed a (Await k h) = k a
+feed a (Await k _) = k a

@@ -200,21 +200,21 @@ discard :: Monad m => Pipe a b m r
 discard = forever await
 
 protect :: Monad m => Finalizer m -> Pipe a b m r -> Pipe a b m r
-protect w p = go p
+protect w = go
   where
     go (Pure r w') = Pure r (w ++ w')
     go (Throw e w') = Throw e (w ++ w')
     go (Await k h) = Await k h
     go (M s m h) = M s (liftM go m) (go . h)
-    go (Yield x p w') = Yield x (go p) (w ++ w')
+    go (Yield x p' w') = Yield x (go p') (w ++ w')
 
 handleBP :: Monad m => r -> Pipe a b m r -> Pipe a b m r
-handleBP r p = go p
+handleBP r = go
   where
-    go (Pure r w) = Pure r w
+    go (Pure r' w) = Pure r' w
     go (Await k h) = Await k h
     go (M s m h) = M s (liftM go m) (go . h)
-    go (Yield x p w) = Yield x (go p) w
+    go (Yield x p' w) = Yield x (go p') w
     go (Throw e w)
       | isBrokenPipe e = Pure r w
       | otherwise      = Throw e w
@@ -266,7 +266,7 @@ runPipe p = E.mask $ \restore -> run restore p
       where
         go (Pure r w) = fin w >> return r
         go (Throw e w) = fin w >> E.throwIO e
-        go (Await k h) = go (k ())
+        go (Await k _) = go (k ())
         go (Yield x _ _) = absurd x
         go (M s m h) = try s m >>= \r -> case r of
           Left e   -> go $ h e
@@ -291,7 +291,7 @@ runPurePipe (Pure r w) = sequence_ w >> return (Right r)
 runPurePipe (Throw e w) = sequence_ w >> return (Left e)
 runPurePipe (Await k _) = runPurePipe $ k ()
 runPurePipe (Yield x _ _) = absurd x
-runPurePipe (M s m h) = m >>= runPurePipe
+runPurePipe (M _ m _) = m >>= runPurePipe
 
 -- | A version of 'runPurePipe' which rethrows any captured exception instead
 -- of returning it.

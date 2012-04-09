@@ -22,7 +22,6 @@ import Control.Category.Associative
 import Control.Category.Braided
 import Control.Category.Monoidal
 import Control.Monad
-import Control.Monad.IO.Class
 import Control.Pipe.Common
 
 -- | Create a 'Pipe' that behaves like the given 'Pipe' of the left component
@@ -116,7 +115,7 @@ loopP = go emptyQueue
     go :: Monad m => Queue c -> Pipe (Either a c) (Either b c) m r -> Pipe a b m r
     go _ (Pure r w) = Pure r w
     go _ (Throw e w) = Throw e w
-    go q (Yield (Right x) p w) = go (enqueue x q) p
+    go q (Yield (Right x) p _) = go (enqueue x q) p
     go q (Yield (Left x) p w) = Yield x (go q p) w
     go q (M s m h) = M s (liftM (go q) m) (go q . h)
     go q (Await k h) = case dequeue q of
