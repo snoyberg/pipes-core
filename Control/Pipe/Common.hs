@@ -186,7 +186,10 @@ masked = liftP Masked
 -- >   x <- await
 -- >   yield (f x)
 pipe :: Monad m => (a -> b) -> Pipe a b m r
-pipe f = forever $ await >>= yield . f
+pipe f = p
+  where
+    p = Await (\x -> Yield (f x) p [])
+              (\e -> Throw e p [])
 
 -- | The identity pipe.
 idP :: Monad m => Pipe a a m r
